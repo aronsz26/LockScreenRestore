@@ -1,8 +1,8 @@
 Package: com.aronsz26.lockscreenrestore
 Name: LockScreenRestore
-Version: 1.4
+Version: 1.5
 Architecture: iphoneos-arm64
-Description: iOS 15 style lock screen on iOS 16: iOS 15 sizes and positions for padlock, clock and date, focus pill under the date, notifications listed from the top, no depth effect. Each part can be switched off in Settings.
+Description: iOS 15 style lock screen on iOS 16: clock, date, padlock, Focus pill, notifications from the top, live wallpapers with Light/Dark switching. Each part can be switched off in Settings.
 Maintainer: aronsz26
 Author: aronsz26
 Section: Tweaks

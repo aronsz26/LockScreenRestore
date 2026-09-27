@@ -24,6 +24,11 @@ Every part can be switched on and off separately in Settings.
 - **iOS 15 Notifications**
   - Notifications listed right under the clock instead of collected at the bottom of the screen
   - iOS 15's narrower side margins
+- **iOS 15 Live Wallpaper**
+  - Live wallpapers are back (iOS 16 removed them): press and hold the lock screen to play
+  - Switches automatically between the Light and Dark version with the system appearance
+  - Shown on the lock screen and the home screen, including while unlocking
+  - Wallpapers aren't included, see [Live wallpapers](#live-wallpapers)
 
 ## Settings
 
@@ -34,6 +39,8 @@ Every part can be switched on and off separately in Settings.
 | iOS 15 Clock | On |
 | iOS 15 Focus | On |
 | iOS 15 Notifications | On |
+| iOS 15 Live Wallpaper | On (does nothing until wallpapers are added) |
+| Wallpaper | Pick one of the wallpapers you added |
 
 Changes take effect after a respring. Use the **Apply (Respring)** button at the bottom of the page.
 
@@ -68,6 +75,23 @@ SpringBoard on iOS 16 still carries per-device lock screen measurements from iOS
 
 On Touch ID iPhones (iPhone 8, 8 Plus, SE) and Dynamic Island iPhones (iPhone 14 Pro, 14 Pro Max), iOS draws the padlock differently, so the padlock part is the least certain there.
 
+## Live wallpapers
+
+Apple's wallpapers are copyrighted, so they're not part of this repository. Each wallpaper is a folder with four files, the still image and the video for Light and Dark:
+
+```
+/var/mobile/Library/LockScreenRestore/Wallpapers/
+└── Light Beams Blue/
+    ├── Light.heic
+    ├── Light.mov
+    ├── Dark.heic
+    └── Dark.mov
+```
+
+The folder name is what **Settings → LockScreenRestore → Wallpaper** shows. Apple's iOS 14/15 live wallpapers (Orbs, Resonance, Light Beams, Twist) come as exactly these still + video pairs; use the files made for your screen size.
+
+While **iOS 15 Live Wallpaper** is on, pressing and holding the lock screen plays the wallpaper instead of opening iOS 16's lock screen editor. Turn the switch off to get the editor back.
+
 ## Installation
 
 1. Download the `.deb` from the [latest release](../../releases/latest).
@@ -101,6 +125,7 @@ make package FINALPACKAGE=1 install
 ## Known limitations
 
 - Notification banners keep iOS 16's style.
+- With **iOS 15 Live Wallpaper** on, the long press no longer opens iOS 16's lock screen editor.
 - Stacked vs. list view still follows **Settings → Notifications → Display As**.
 - Other tweaks that change the lock screen clock, padlock or notification list may conflict.
 

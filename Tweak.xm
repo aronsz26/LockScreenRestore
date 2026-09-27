@@ -7,17 +7,22 @@
 // still carries from iOS 15 (SBFLockScreenMetrics) plus ratios measured against Apple's iOS 15
 // lock screen, and are converted with the real font metrics at runtime.
 //
-// Three independently switchable groups (Settings > LockScreenRestore, all on by default),
+// Four independently switchable groups (Settings > LockScreenRestore, all on by default),
 // applied at SpringBoard launch — the settings page has a respring button.
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <CoreText/CoreText.h>
+#import <AVFoundation/AVFoundation.h>
 
 // Read straight from disk: NSUserDefaults in SpringBoard's constructor didn't see the values
-// (cfprefsd). The settings page flushes to disk before its respring.
-static NSString *const kLSRPrefsPath = @"/var/mobile/Library/Preferences/com.aronsz26.lockscreenrestore.plist";
+// (cfprefsd). The settings page flushes to disk before its respring. Rootless jailbreaks
+// (Dopamine) redirect tweak preferences under /var/jb, so look there first.
+static NSString *const kLSRPrefsPaths[] = {
+    @"/var/jb/var/mobile/Library/Preferences/com.aronsz26.lockscreenrestore.plist",
+    @"/var/mobile/Library/Preferences/com.aronsz26.lockscreenrestore.plist",
+};
 static BOOL sLSRClockEnabled = YES;
 
 @interface SBFLockScreenDateView : UIView
@@ -532,6 +537,357 @@ static const CGFloat kIOS15FocusPillGap = 10.0;
 
 %end // LSRNotifications
 
+#pragma mark - Group: iOS 15 live wallpaper
+//
+// iOS 16 dropped live wallpapers. Apple's iOS 15 wallpapers come as a still plus a 3s video per
+// appearance. We show them in our own view on top of iOS's wallpaper, inside the wallpaper
+// window, switch between Light and Dark with the system appearance, and play the video while
+// the lock screen is pressed (like iOS 15).
+//
+// The files aren't bundled (they're Apple's): <kLSRWallpapersDir>/<Design>/{Light,Dark}.{heic,mov}
+
+static NSString *const kLSRWallpapersDir = @"/var/mobile/Library/LockScreenRestore/Wallpapers";
+static NSString *sLSRWallpaperDesignDir = nil;
+
+#ifdef DEBUG
+static void LSRDebugLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
+static void LSRDebugLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *line = [NSString stringWithFormat:@"%.2f %@\n", CACurrentMediaTime(), [[NSString alloc] initWithFormat:format arguments:args]];
+    va_end(args);
+    NSString *path = @"/var/mobile/Documents/LockScreenRestoreDebug.log";
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) {
+        [line writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [fh seekToEndOfFile];
+    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
+}
+#else
+#define LSRDebugLog(...) do {} while (0)
+#endif
+
+static NSString *LSRWallpaperVariant(UITraitCollection *traits) {
+    return traits.userInterfaceStyle == UIUserInterfaceStyleDark ? @"Dark" : @"Light";
+}
+
+// Decoded once per variant: the same still is shown by several views (the wallpaper window and
+// the copies iOS slides around during lock/unlock).
+static UIImage *LSRWallpaperStill(NSString *variant) {
+    static NSMutableDictionary<NSString *, UIImage *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSMutableDictionary new]; });
+    UIImage *image = cache[variant];
+    if (!image) {
+        NSString *path = [[sLSRWallpaperDesignDir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"heic"];
+        image = [UIImage imageWithContentsOfFile:path];
+        if (image) cache[variant] = image;
+    }
+    return image;
+}
+
+@interface LSRLiveWallpaperView : UIView
+- (void)playVideo;
+- (void)stopVideo;
+@end
+
+@implementation LSRLiveWallpaperView {
+    UIImageView *_imageView;
+    AVPlayer *_player;
+    AVPlayerLayer *_playerLayer;
+    NSString *_loadedVariant;
+    NSURL *_videoURL;
+    BOOL _wantsVideoVisible;
+}
+
+static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.userInteractionEnabled = NO;
+        self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _imageView = [[UIImageView alloc] initWithFrame:self.bounds];
+        _imageView.contentMode = UIViewContentModeScaleAspectFill;
+        _imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self addSubview:_imageView];
+
+        _player = [AVPlayer new];
+        _player.muted = YES;
+        _player.actionAtItemEnd = AVPlayerActionAtItemEndPause;
+        _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
+        _playerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+        _playerLayer.opacity = 0.0;
+        [self.layer addSublayer:_playerLayer];
+
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_videoDidEnd:)
+                                                     name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
+        [_playerLayer addObserver:self forKeyPath:@"readyForDisplay" options:0 context:kLSRReadyForDisplayContext];
+        [self _loadCurrentVariant];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [_playerLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kLSRReadyForDisplayContext];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+// Show the video layer only once it has a frame, so a fresh item never flashes black.
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (context != kLSRReadyForDisplayContext) {
+        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self->_wantsVideoVisible || !self->_playerLayer.isReadyForDisplay) return;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self->_playerLayer.opacity = 1.0;
+        [CATransaction commit];
+    });
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    _playerLayer.frame = self.bounds;
+    [CATransaction commit];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    [self _loadCurrentVariant];
+}
+
+- (void)_loadCurrentVariant {
+    NSString *variant = LSRWallpaperVariant(self.traitCollection);
+    if ([variant isEqualToString:_loadedVariant]) return;
+    _loadedVariant = variant;
+    _imageView.image = LSRWallpaperStill(variant);
+    _videoURL = [NSURL fileURLWithPath:[[sLSRWallpaperDesignDir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]];
+    [self stopVideo];
+}
+
+// A fresh item every time: an item created before media services were reset (e.g. by a
+// respring) stays "ready" but never plays (AVFoundationErrorDomain -11819).
+- (void)playVideo {
+    if (!_videoURL) return;
+    AVPlayerItem *item = [AVPlayerItem playerItemWithURL:_videoURL];
+    [_player replaceCurrentItemWithPlayerItem:item];
+    _wantsVideoVisible = YES;
+    [_player play];
+    LSRDebugLog(@"playVideo item=%@ status=%ld error=%@", item, (long)item.status, item.error);
+}
+
+- (void)stopVideo {
+    _wantsVideoVisible = NO;
+    [_player pause];
+    [CATransaction begin];
+    [CATransaction setAnimationDuration:0.3];
+    _playerLayer.opacity = 0.0;
+    [CATransaction commit];
+}
+
+- (void)_videoDidEnd:(NSNotification *)notification {
+    if (notification.object == _player.currentItem) [self stopVideo];
+}
+@end
+
+static __weak LSRLiveWallpaperView *sLSRWallpaperView = nil;
+
+@interface _SBWallpaperSecureWindow : UIWindow
+@end
+
+@interface CSCoverSheetViewController : UIViewController
+@end
+
+// While the lock screen slides away or back (unlock, lock, notification center, camera/today
+// swipes), iOS draws a portal copy of its real wallpaper inside the lock screen window
+// (SBWallpaperEffectView > PBUIWallpaperView > PBUIPortalReplicaEffectView). That's the old
+// wallpaper flashing; cover those copies with our still too.
+@interface LSRStillCoverView : UIImageView
+@end
+
+@implementation LSRStillCoverView
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    self.image = LSRWallpaperStill(LSRWallpaperVariant(self.traitCollection));
+}
+@end
+
+static void LSRCoverWithStill(UIView *effectView) {
+    // Only full-screen copies in the lock screen window: the same class also backs smaller
+    // blurred surfaces elsewhere, which must keep their look.
+    if (![effectView.window isKindOfClass:NSClassFromString(@"SBCoverSheetWindow")]) return;
+    CGSize screen = [UIScreen mainScreen].bounds.size;
+    if (fabs(effectView.bounds.size.width - screen.width) > 1 || fabs(effectView.bounds.size.height - screen.height) > 1) return;
+
+    LSRStillCoverView *cover = nil;
+    for (UIView *sub in effectView.subviews) {
+        if ([sub isKindOfClass:[LSRStillCoverView class]]) cover = (LSRStillCoverView *)sub;
+    }
+    if (!cover) {
+        cover = [[LSRStillCoverView alloc] initWithFrame:effectView.bounds];
+        cover.contentMode = UIViewContentModeScaleAspectFill;
+        cover.clipsToBounds = YES;
+        cover.userInteractionEnabled = NO;
+        cover.image = LSRWallpaperStill(LSRWallpaperVariant(effectView.traitCollection));
+    }
+    if (effectView.subviews.lastObject != cover) [effectView addSubview:cover];
+    if (!CGRectEqualToRect(cover.frame, effectView.bounds)) cover.frame = effectView.bounds;
+}
+
+@interface SBWallpaperEffectView : UIView
+@end
+
+@interface SBDashBoardWallpaperEffectView : UIView
+@end
+
+@interface LSRWallpaperPressHandler : NSObject <UIGestureRecognizerDelegate>
++ (instancetype)shared;
+- (void)handlePress:(UILongPressGestureRecognizer *)recognizer;
+@end
+
+@implementation LSRWallpaperPressHandler
++ (instancetype)shared {
+    static LSRWallpaperPressHandler *handler;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ handler = [LSRWallpaperPressHandler new]; });
+    return handler;
+}
+
+- (void)handlePress:(UILongPressGestureRecognizer *)recognizer {
+    LSRDebugLog(@"press state %ld, wallpaper view %@", (long)recognizer.state, sLSRWallpaperView);
+    switch (recognizer.state) {
+        case UIGestureRecognizerStateBegan:
+            [sLSRWallpaperView playVideo];
+            break;
+        case UIGestureRecognizerStateEnded:
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed:
+            [sLSRWallpaperView stopVideo];
+            break;
+        default:
+            break;
+    }
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
+    return YES;
+}
+
+// Only presses on the wallpaper itself, not on something that has its own press behaviour.
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
+    for (UIView *view = touch.view; view; view = view.superview) {
+        NSString *name = NSStringFromClass([view class]);
+        BOOL blocked = [view isKindOfClass:[UIControl class]];
+        for (NSString *fragment in @[@"ShortLook", @"LongLook", @"ListCell", @"PlatterView", @"AdjunctItem", @"QuickActions"]) {
+            if ([name containsString:fragment]) blocked = YES;
+        }
+        if (blocked) {
+            LSRDebugLog(@"touch on %@ ignored (inside %@)", NSStringFromClass([touch.view class]), name);
+            return NO;
+        }
+    }
+    LSRDebugLog(@"touch on %@ accepted", NSStringFromClass([touch.view class]));
+    return YES;
+}
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    LSRDebugLog(@"press should begin");
+    return YES;
+}
+@end
+
+%group LSRWallpaper
+
+%hook _SBWallpaperSecureWindow
+- (void)layoutSubviews {
+    %orig;
+    // Directly above iOS's wallpaper content (the window's first subview), below anything iOS
+    // layers on top of it.
+    LSRLiveWallpaperView *view = sLSRWallpaperView;
+    if (!view || view.superview != self) {
+        view = [[LSRLiveWallpaperView alloc] initWithFrame:self.bounds];
+        sLSRWallpaperView = view;
+    }
+    UIView *wallpaperContent = self.subviews.firstObject;
+    NSUInteger wantedIndex = wallpaperContent == view ? 0 : 1;
+    if (view.superview != self || [self.subviews indexOfObject:view] != wantedIndex) {
+        [self insertSubview:view aboveSubview:wallpaperContent];
+    }
+    if (!CGRectEqualToRect(view.frame, self.bounds)) view.frame = self.bounds;
+}
+%end
+
+// iOS 16's lock screen long press opens the poster (lock screen) editor; on iOS 15 it played the
+// live wallpaper. Replace it with our own press recognizer: play while held, back to the still
+// on release. Presses on notifications and controls (flashlight, camera, ...) are left alone.
+%hook CSCoverSheetViewController
+- (void)viewDidLoad {
+    %orig;
+    UILongPressGestureRecognizer *press = [[UILongPressGestureRecognizer alloc]
+        initWithTarget:[LSRWallpaperPressHandler shared] action:@selector(handlePress:)];
+    press.minimumPressDuration = 0.35;
+    press.cancelsTouchesInView = NO;
+    press.delegate = [LSRWallpaperPressHandler shared];
+    [self.view addGestureRecognizer:press];
+}
+
+- (void)_setupPosterSwitcherGestureRecognizer {
+}
+
+- (void)_handlePosterSwitcherActivation:(id)sender {
+}
+%end
+
+%hook SBWallpaperEffectView
+- (void)layoutSubviews {
+    %orig;
+    LSRCoverWithStill(self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    LSRCoverWithStill(self);
+}
+%end
+
+%hook SBDashBoardWallpaperEffectView
+- (void)layoutSubviews {
+    %orig;
+    LSRCoverWithStill(self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    LSRCoverWithStill(self);
+}
+%end
+
+%end // LSRWallpaper
+
+// The chosen design's folder, or the first one available; nil if there are none.
+static NSString *LSRResolveWallpaperDesignDir(NSDictionary *prefs) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *chosen = prefs[@"wallpaperDesign"];
+    if ([chosen isKindOfClass:[NSString class]] && chosen.length) {
+        NSString *dir = [kLSRWallpapersDir stringByAppendingPathComponent:chosen];
+        if ([fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"Light.heic"]]) return dir;
+    }
+    NSArray *designs = [[fm contentsOfDirectoryAtPath:kLSRWallpapersDir error:nil]
+        sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
+    for (NSString *design in designs) {
+        NSString *dir = [kLSRWallpapersDir stringByAppendingPathComponent:design];
+        if ([fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"Light.heic"]]) return dir;
+    }
+    return nil;
+}
+
 #pragma mark - Settings
 
 // Missing file/key = never touched in Settings = on (the default).
@@ -541,11 +897,18 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
 }
 
 %ctor {
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:kLSRPrefsPath];
+    NSDictionary *prefs = nil;
+    for (size_t i = 0; i < sizeof(kLSRPrefsPaths) / sizeof(kLSRPrefsPaths[0]) && !prefs; i++) {
+        prefs = [NSDictionary dictionaryWithContentsOfFile:kLSRPrefsPaths[i]];
+    }
     sLSRClockEnabled = LSRPrefEnabled(prefs, @"clockEnabled");
     if (sLSRClockEnabled) %init(LSRClock);
     if (LSRPrefEnabled(prefs, @"focusEnabled")) %init(LSRFocus);
     if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);
+    if (LSRPrefEnabled(prefs, @"liveWallpaperEnabled")) {
+        sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
+        if (sLSRWallpaperDesignDir) %init(LSRWallpaper);
+    }
 
 #ifdef DEBUG
     // Debug builds: write the computed per-device layout for checking over SSH.

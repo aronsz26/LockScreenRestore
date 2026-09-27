@@ -1,5 +1,10 @@
 #import <Preferences/PSListController.h>
+#import <Preferences/PSSpecifier.h>
 #import <sys/sysctl.h>
+
+@interface PSSpecifier (LSRPrivate)
+- (void)setValues:(NSArray *)values titles:(NSArray *)titles;
+@end
 
 @interface FBSSystemService : NSObject
 + (instancetype)sharedService;
@@ -55,8 +60,31 @@ static NSString *LSRDeviceName(NSString *model) {
 - (NSArray *)specifiers {
     if (!_specifiers) {
         _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
+        [self _fillWallpaperDesigns];
     }
     return _specifiers;
+}
+
+// One entry per folder that has at least a Light.heic; the tweak falls back to the first one
+// when nothing has been picked yet, so that's the default here too.
+- (void)_fillWallpaperDesigns {
+    PSSpecifier *picker = [self specifierForID:@"wallpaperDesign"];
+    for (PSSpecifier *specifier in _specifiers) {
+        if ([[specifier propertyForKey:@"key"] isEqualToString:@"wallpaperDesign"]) picker = specifier;
+    }
+    if (!picker) return;
+
+    NSString *root = @"/var/mobile/Library/LockScreenRestore/Wallpapers";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray *designs = [NSMutableArray new];
+    for (NSString *name in [[fm contentsOfDirectoryAtPath:root error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
+        NSString *still = [[root stringByAppendingPathComponent:name] stringByAppendingPathComponent:@"Light.heic"];
+        if ([fm fileExistsAtPath:still]) [designs addObject:name];
+    }
+    if (!designs.count) [designs addObject:@"None found"];
+    if (![picker respondsToSelector:@selector(setValues:titles:)]) return;
+    [picker setValues:designs titles:designs];
+    [picker setProperty:designs.firstObject forKey:@"default"];
 }
 
 // The tweak picks its hook groups at SpringBoard launch (reading the plist from disk), so flush

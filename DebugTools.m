@@ -199,6 +199,63 @@ static void LSRRunCalls(NSString *body) {
             encoding:NSUTF8StringEncoding error:nil];
 }
 
+// Burst: for 120s, every 0.2s, note every *visible* view that could be a wallpaper copy (PBUI*,
+// portals, snapshots, big images) -> LockScreenRestoreBurst-now.log with first/last sighting.
+static BOOL LSRLooksLikeWallpaper(UIView *view) {
+    NSString *name = NSStringFromClass([view class]);
+    for (NSString *fragment in @[@"PBUI", @"Portal", @"Snapshot", @"Wallpaper", @"Parallax", @"Poster", @"LSRLive"]) {
+        if ([name containsString:fragment]) return YES;
+    }
+    if ([view isKindOfClass:[UIImageView class]]) {
+        CGSize size = ((UIImageView *)view).image.size;
+        return size.width >= 1000 && size.height >= 2000;
+    }
+    return NO;
+}
+
+// Stops at hidden/transparent views, so everything reached has visible ancestors.
+static void LSRCollectWallpaperViews(UIView *view, NSString *windowName, CFTimeInterval t, NSMutableDictionary *seen) {
+    if (view.hidden || view.alpha < 0.01) return;
+    if (LSRLooksLikeWallpaper(view)) {
+        NSString *key = [NSString stringWithFormat:@"%@ | %@ %p", windowName, NSStringFromClass([view class]), view];
+        NSMutableDictionary *entry = seen[key];
+        CGRect frame = [view convertRect:view.bounds toView:nil];
+        if (!entry) {
+            entry = [@{ @"first": @(t), @"count": @0, @"frames": [NSMutableSet new],
+                        @"window": @(view.window.windowLevel) } mutableCopy];
+            seen[key] = entry;
+        }
+        entry[@"last"] = @(t);
+        entry[@"count"] = @([entry[@"count"] integerValue] + 1);
+        [entry[@"frames"] addObject:NSStringFromCGRect(frame)];
+    }
+    for (UIView *sub in view.subviews) LSRCollectWallpaperViews(sub, windowName, t, seen);
+}
+
+static void LSRRunBurst(void) {
+    NSMutableDictionary *seen = [NSMutableDictionary new];
+    CFTimeInterval start = CACurrentMediaTime();
+    __block NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:YES block:^(NSTimer *t) {
+        CFTimeInterval now = CACurrentMediaTime() - start;
+        for (UIWindow *window in [UIWindow allWindowsIncludingInternalWindows:YES onlyVisibleWindows:NO]) {
+            if (window.hidden) continue;
+            LSRCollectWallpaperViews(window, NSStringFromClass([window class]), now, seen);
+        }
+        if (now < 120.0) return;
+        [t invalidate];
+        NSMutableString *out = [NSMutableString new];
+        for (NSString *key in [seen.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+            NSDictionary *e = seen[key];
+            [out appendFormat:@"%@\n    seen %@x, %.1fs..%.1fs, windowLevel %@, frames: %@\n", key, e[@"count"],
+                [e[@"first"] doubleValue], [e[@"last"] doubleValue], e[@"window"],
+                [[e[@"frames"] allObjects] componentsJoinedByString:@" "]];
+        }
+        [out writeToFile:@"/var/mobile/Documents/LockScreenRestoreBurst-now.log" atomically:YES
+                encoding:NSUTF8StringEncoding error:nil];
+    }];
+    (void)timer;
+}
+
 __attribute__((constructor)) static void LSRInstallDebugTools(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer *timer) {
@@ -218,6 +275,11 @@ __attribute__((constructor)) static void LSRInstallDebugTools(void) {
                     if (trimmed.length) [fragments addObject:trimmed];
                 }
                 if (fragments.count) LSRRunRecon(fragments);
+            }
+            NSString *burstRequest = @"/var/mobile/Documents/lsr-burst-request";
+            if ([fm fileExistsAtPath:burstRequest]) {
+                [fm removeItemAtPath:burstRequest error:nil];
+                LSRRunBurst();
             }
             NSString *callRequest = @"/var/mobile/Documents/lsr-call-request";
             if ([fm fileExistsAtPath:callRequest]) {
