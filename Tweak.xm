@@ -13,6 +13,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <CoreText/CoreText.h>
 
 // Read straight from disk: NSUserDefaults in SpringBoard's constructor didn't see the values
 // (cfprefsd). The settings page flushes to disk before its respring.
@@ -66,6 +67,13 @@ static BOOL sLSRClockEnabled = YES;
 // - the date's descenders reach 0.21em below its baseline; content under the date (the Focus
 //   pill, whose item has 10pt of built-in top padding) starts right there
 static const CGFloat kIOS15ClockScale = 0.8;
+// Weights on the system font's weight axis (Thin 111, Light 274, Regular 400, Medium 510).
+// Clock: Thin looked slightly too thin, 220 and 250 too thick, 170 matched. Date: Regular (170
+// looked too thin, Medium too heavy). UIFontWeight values between the named weights get
+// rounded to the nearest one, so the axis is set directly.
+static const CGFloat kIOS15ClockWeightAxis = 170.0;
+static const CGFloat kIOS15DateWeightAxis = 400.0;
+static const uint32_t kFontAxisWeight = 'wght';
 static const CGFloat kIOS15TimeBaselineAboveDate = 0.441;
 static const CGFloat kSFDigitHeight = 0.717;
 static const CGFloat kIOS15PadlockCenterAboveDigits = 0.531;
@@ -111,12 +119,27 @@ static LSRLayout LSRCurrentLayout(void) {
     return layout;
 }
 
+static UIFont *LSRSystemFont(CGFloat size, CGFloat weightAxis) {
+    UIFont *base = [UIFont systemFontOfSize:size weight:UIFontWeightRegular];
+    UIFontDescriptor *descriptor = [base.fontDescriptor fontDescriptorByAddingAttributes:@{
+        (__bridge NSString *)kCTFontVariationAttribute: @{ @(kFontAxisWeight): @(weightAxis) },
+    }];
+    return [UIFont fontWithDescriptor:descriptor size:size];
+}
+
+// Cached: compared with isEqual: on every layout pass, and building them isn't free.
 static UIFont *LSRClockFont(void) {
-    return [UIFont systemFontOfSize:LSRCurrentLayout().clockFontSize weight:UIFontWeightThin];
+    static UIFont *font;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ font = LSRSystemFont(LSRCurrentLayout().clockFontSize, kIOS15ClockWeightAxis); });
+    return font;
 }
 
 static UIFont *LSRDateFont(void) {
-    return [UIFont systemFontOfSize:LSRCurrentLayout().dateFontSize weight:UIFontWeightRegular];
+    static UIFont *font;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ font = LSRSystemFont(LSRCurrentLayout().dateFontSize, kIOS15DateWeightAxis); });
+    return font;
 }
 
 static UIView *LSRFindSubview(UIView *root, Class cls) {

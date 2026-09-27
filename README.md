@@ -41,14 +41,19 @@ Changes take effect after a respring. Use the **Apply (Respring)** button at the
 
 ## Compatibility
 
-| | |
-|---|---|
-| Tested on | iPhone 13 Pro, iOS 16.1.1, Dopamine (rootless), ElleKit |
-| Jailbreak type | Rootless only |
-| Other iOS 16 versions | Untested |
-| Other iPhones | Supported but untested: every iPhone that runs iOS 16 (iPhone 8 up to iPhone 14 Pro Max). Positions are calculated for each screen, see below. |
+Rootless jailbreaks on iOS 16 only. Tested with Dopamine and ElleKit on iOS 16.1.1; other iOS 16 versions are untested.
 
-If you try it on another device or iOS version, please open an issue with a screenshot and tell me how it went.
+| iPhone | Screen | Status |
+|---|---|---|
+| iPhone 13 Pro | 390 × 844 pt | ✅ Tested |
+| iPhone 12, 12 Pro, 13, 14 | 390 × 844 pt | Should work (same screen as tested) |
+| iPhone X, XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Supported, untested |
+| iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Supported, untested |
+| iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
+| iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Supported, untested (padlock least certain) |
+| iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported, untested (padlock least certain) |
+
+Positions are calculated for each screen (see below). If you try it on an untested iPhone, please open an issue with a screenshot.
 
 ## How positions are calculated
 
