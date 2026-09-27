@@ -8,6 +8,7 @@
 //     -> LockScreenRestoreRecon-now.log: methods/ivars/properties of matching classes
 //   printf "CSCombinedListViewController topContentInset\n" > /var/mobile/Documents/lsr-call-request
 //     -> LockScreenRestoreCalls-now.log: result of a zero-argument getter on the live instance
+//        ("Class +selector" calls a class method; "Class a.b.c" follows a getter chain)
 
 #ifdef DEBUG
 
@@ -175,7 +176,10 @@ static void LSRRunCalls(NSString *body) {
             componentsSeparatedByString:@" "];
         if (parts.count != 2) continue;
         Class cls = NSClassFromString(parts[0]);
-        id target = cls ? LSRFindLiveObject(cls) : nil;
+        // "+selector" calls a class method instead of looking for a live instance.
+        BOOL classCall = [parts[1] hasPrefix:@"+"];
+        if (classCall) parts = @[parts[0], [parts[1] substringFromIndex:1]];
+        id target = cls ? (classCall ? (id)cls : LSRFindLiveObject(cls)) : nil;
         NSString *result = @"<no live instance>";
         if (target) {
             @try {

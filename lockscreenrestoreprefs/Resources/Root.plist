@@ -64,6 +64,20 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
+			<string>Sizes and positions are calculated for your screen every time SpringBoard starts. Fix Positions shows what was detected and recalculates.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Fix Positions</string>
+			<key>action</key>
+			<string>fixPositions</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
 			<string>Changes take effect after a respring.</string>
 		</dict>
 		<dict>

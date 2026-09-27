@@ -1,15 +1,18 @@
-// LockScreenRestore — iOS 15 lock screen look on iOS 16 (tested on 16.1.1, Dopamine rootless):
+// LockScreenRestore — iOS 15 lock screen look on iOS 16 (rootless):
 // thin white clock, date below it as "Sunday, September 27", focus pill under the date, big
 // padlock that stays open after Face ID, notifications listed top-down under the clock, no
-// vibrancy tint, no depth effect, no widgets. Sizes/positions match Apple's iOS 15 render.
+// vibrancy tint, no depth effect, no widgets.
 //
-// Class/selector names come from live runtime introspection + view-hierarchy dumps on-device.
+// Sizes and positions adapt to the device: they come from the per-device values SpringBoard
+// still carries from iOS 15 (SBFLockScreenMetrics) plus ratios measured against Apple's iOS 15
+// lock screen, and are converted with the real font metrics at runtime.
 //
 // Three independently switchable groups (Settings > LockScreenRestore, all on by default),
 // applied at SpringBoard launch — the settings page has a respring button.
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 // Read straight from disk: NSUserDefaults in SpringBoard's constructor didn't see the values
 // (cfprefsd). The settings page flushes to disk before its respring.
@@ -17,16 +20,13 @@ static NSString *const kLSRPrefsPath = @"/var/mobile/Library/Preferences/com.aro
 static BOOL sLSRClockEnabled = YES;
 
 @interface SBFLockScreenDateView : UIView
++ (UIFont *)timeFont;
 - (void)setCustomTimeFont:(UIFont *)font;
 - (UIFont *)customTimeFont;
 @end
 
 @interface BSUIVibrancyEffectView : UIView
 @property (nonatomic) BOOL isEnabled;
-@end
-
-@interface CSProminentDisplayView : UIView
-@property (readonly, nonatomic) BSUIVibrancyEffectView *vibrancyEffectView;
 @end
 
 @interface CSProminentTextElementView : UIView
@@ -40,6 +40,13 @@ static BOOL sLSRClockEnabled = YES;
 @interface CSProminentSubtitleDateView : CSProminentTextElementView
 @end
 
+@interface CSProminentDisplayView : UIView
+@property (readonly, nonatomic) BSUIVibrancyEffectView *vibrancyEffectView;
+@property (nonatomic, strong) CSProminentTimeView *timeView;
+@property (nonatomic, strong) CSProminentTextElementView *transientSubtitleView;
+@property (nonatomic, strong) CSProminentTextElementView *customSubtitleView;
+@end
+
 @interface _UIAnimatingLabel : UILabel
 @end
 
@@ -49,21 +56,67 @@ static BOOL sLSRClockEnabled = YES;
 @interface PBUIPosterFloatingLayerReplica : UIView
 @end
 
-// Measured against Apple's iOS 15 lock screen render (390pt-wide screen, 1.156 px/pt): digits
-// 57pt tall (SF digits are 0.717em -> 80pt font), "Monday, June 7" 140pt wide (-> 19.5pt),
-// padlock top at 54.5pt, digits top at 119pt, date cap top at 196pt.
-static const CGFloat kIOS15ClockFontSize = 80.0;
-static const CGFloat kIOS15DateFontSize = 19.5;
-// Offsets from where iOS 16 puts the top of the date view (screen y 85). A label's glyph top
-// sits 0.235em below its top edge for digits and ~0.24em for capitals. The 80pt time label is
-// vertically centered in a view iOS still sizes for 100pt (119 vs 95.7 tall -> 11.7 lower).
-static const CGFloat kIOS15TimeTop = 3.8;    // 119.3 - 0.235 * 80 - 11.7 - 85
-static const CGFloat kIOS15DateTop = 100.4;  // 196.3 - 0.24 * 19.5 - (36 - 23.3) / 2 - 85
-static const CGFloat kIOS15PadlockScale = 2.0;
-static const CGFloat kIOS15PadlockDrop = 12.3;
+#pragma mark - Per-device layout
+
+// Ratios measured on Apple's iOS 15 lock screen (both reference renders agree):
+// - the iOS 15 clock is 0.8x the size of iOS 16's clock font on the same device (80 vs 100pt)
+// - time baseline sits 0.441 x clock size above the date baseline (0.615 x digit height)
+// - SF digits are 0.717em tall
+// - the padlock's center sits 0.531 x clock size above the top of the digits
+// - the date's descenders reach 0.21em below its baseline; content under the date (the Focus
+//   pill, whose item has 10pt of built-in top padding) starts right there
+static const CGFloat kIOS15ClockScale = 0.8;
+static const CGFloat kIOS15TimeBaselineAboveDate = 0.441;
+static const CGFloat kSFDigitHeight = 0.717;
+static const CGFloat kIOS15PadlockCenterAboveDigits = 0.531;
+static const CGFloat kSFDescender = 0.21;
+
+typedef struct {
+    CGFloat clockFontSize;
+    CGFloat dateFontSize;
+    CGFloat timeBaselineY;   // screen coordinates, lock screen at rest
+    CGFloat dateBaselineY;
+    CGFloat padlockScale;
+    CGFloat padlockDrop;     // from iOS 16's padlock position to the iOS 15 one
+} LSRLayout;
+
+static CGFloat LSRClassMetric(NSString *className, NSString *selectorName, CGFloat fallback) {
+    Class cls = NSClassFromString(className);
+    SEL sel = NSSelectorFromString(selectorName);
+    if (!cls || ![cls respondsToSelector:sel]) return fallback;
+    CGFloat value = ((CGFloat (*)(id, SEL))objc_msgSend)(cls, sel);
+    return value > 0 ? value : fallback;
+}
+
+// Fallbacks are the values an iPhone 13 Pro reports.
+static LSRLayout LSRCurrentLayout(void) {
+    static LSRLayout layout;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        Class dateViewClass = NSClassFromString(@"SBFLockScreenDateView");
+        UIFont *iOS16TimeFont = [dateViewClass respondsToSelector:@selector(timeFont)] ? [dateViewClass timeFont] : nil;
+        CGFloat iOS16TimeSize = iOS16TimeFont.pointSize > 0 ? iOS16TimeFont.pointSize : 100.0;
+
+        layout.clockFontSize = round(iOS16TimeSize * kIOS15ClockScale);
+        layout.dateFontSize = LSRClassMetric(@"SBFLockScreenMetrics", @"dateLabelFontSize", 20.0);
+        layout.dateBaselineY = LSRClassMetric(@"SBFLockScreenMetrics", @"subtitleBaselineOffsetFromTopOfScreen", 211.0);
+        layout.timeBaselineY = layout.dateBaselineY - kIOS15TimeBaselineAboveDate * layout.clockFontSize;
+        layout.padlockScale = 1.0 / LSRClassMetric(@"SBFLockScreenMetrics", @"proudLockScaleFactor", 0.5);
+
+        CGFloat digitsTop = layout.timeBaselineY - kSFDigitHeight * layout.clockFontSize;
+        CGFloat padlockCenter = digitsTop - kIOS15PadlockCenterAboveDigits * layout.clockFontSize;
+        CGFloat iOS16PadlockCenter = LSRClassMetric(@"SBFLockScreenMetrics", @"proudLockCenterFromTopOfScreen", 64.5);
+        layout.padlockDrop = padlockCenter - iOS16PadlockCenter;
+    });
+    return layout;
+}
 
 static UIFont *LSRClockFont(void) {
-    return [UIFont systemFontOfSize:kIOS15ClockFontSize weight:UIFontWeightThin];
+    return [UIFont systemFontOfSize:LSRCurrentLayout().clockFontSize weight:UIFontWeightThin];
+}
+
+static UIFont *LSRDateFont(void) {
+    return [UIFont systemFontOfSize:LSRCurrentLayout().dateFontSize weight:UIFontWeightRegular];
 }
 
 static UIView *LSRFindSubview(UIView *root, Class cls) {
@@ -84,46 +137,49 @@ static UIView *LSRFindSubview(UIView *root, Class cls) {
 - (void)layoutSubviews {
     // Only set when it differs: setting it schedules another layout pass, and doing it
     // unconditionally froze SpringBoard in an endless layout loop.
-    if (fabs(self.customTimeFont.pointSize - kIOS15ClockFontSize) > 0.5) {
+    if (fabs(self.customTimeFont.pointSize - LSRCurrentLayout().clockFontSize) > 0.5) {
         [self setCustomTimeFont:LSRClockFont()];
     }
     %orig;
 }
 %end
 
-#pragma mark - Time on top, date below
+#pragma mark - Time and date positions
 //
 // iOS positions CSProminentTimeView / CSProminentSubtitleDateView via setFrame:/setCenter:.
-// Transforms on top of that get mis-compensated by UIKit, so instead we record the positions
-// iOS assigns (per container) and substitute the iOS 15 positions, anchored to where iOS 16
-// puts the date.
+// Transforms on top of that get mis-compensated by UIKit, so we substitute the position
+// instead. Targets are baselines in screen coordinates; the full-screen CSProminentDisplayView
+// is the reference, so the math also holds while the lock screen is being swiped away. Each
+// label is vertically centered in its view, and its baseline sits one ascender below its top.
 
-// Set while we assign positions ourselves, so nested setFrame:/setCenter: calls pass straight
-// through instead of being recorded as iOS's values.
+// Set while we assign positions ourselves, so nested setFrame:/setCenter: calls pass through.
 static BOOL sLSRApplying = NO;
 
-static const void *kLSRSysTimeTopKey = &kLSRSysTimeTopKey;
-static const void *kLSRSysDateTopKey = &kLSRSysDateTopKey;
+// The full-screen view holding time and date; the focus pill measures itself against it.
+static __weak UIView *sLSRDisplayView = nil;
 
-static void LSRRecord(UIView *container, const void *key, CGFloat value) {
-    objc_setAssociatedObject(container, key, @(value), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
+// Top for a view whose centered label (in `font`) should have its baseline at `baselineY`.
+static BOOL LSRTargetTopForBaseline(UIView *view, CGFloat baselineY, UIFont *font, CGFloat height, CGFloat *outTop) {
+    UIView *container = view.superview;
+    UIView *display = container;
+    Class displayClass = NSClassFromString(@"CSProminentDisplayView");
+    while (display && ![display isKindOfClass:displayClass]) display = display.superview;
+    if (!container || !display || !font) return NO;
 
-static NSNumber *LSRRecorded(UIView *container, const void *key) {
-    return objc_getAssociatedObject(container, key);
-}
-
-// NO = leave it alone (not enough info yet, or iOS already uses the iOS 15 order).
-static BOOL LSRDesiredTop(UIView *container, BOOL isTime, CGFloat *outTop) {
-    NSNumber *timeTop = LSRRecorded(container, kLSRSysTimeTopKey);
-    NSNumber *dateTop = LSRRecorded(container, kLSRSysDateTopKey);
-    if (!timeTop || !dateTop) return NO;
-    if (dateTop.doubleValue >= timeTop.doubleValue) return NO;
-    *outTop = dateTop.doubleValue + (isTime ? kIOS15TimeTop : kIOS15DateTop);
+    CGFloat containerY = [container convertPoint:CGPointZero toView:display].y;
+    *outTop = baselineY - containerY - ((height - font.lineHeight) / 2.0 + font.ascender);
     return YES;
 }
 
+static BOOL LSRTargetTop(UIView *view, BOOL isTime, CGFloat height, CGFloat *outTop) {
+    LSRLayout layout = LSRCurrentLayout();
+    return LSRTargetTopForBaseline(view, isTime ? layout.timeBaselineY : layout.dateBaselineY,
+                                   isTime ? LSRClockFont() : LSRDateFont(), height, outTop);
+}
+
 static void LSRMoveTop(UIView *view, CGFloat top) {
+    CGFloat currentTop = view.center.y - view.bounds.size.height / 2.0;
+    if (fabs(currentTop - top) < 0.25) return;
     CGPoint center = view.center;
     center.y = top + view.bounds.size.height / 2.0;
     sLSRApplying = YES;
@@ -131,20 +187,27 @@ static void LSRMoveTop(UIView *view, CGFloat top) {
     sLSRApplying = NO;
 }
 
-// Re-place the other view too, so both are right in the same pass whatever order iOS uses.
-static void LSRRepositionSibling(UIView *container, BOOL siblingIsTime) {
-    Class cls = NSClassFromString(siblingIsTime ? @"CSProminentTimeView" : @"CSProminentSubtitleDateView");
-    for (UIView *sub in container.subviews) {
-        if (![sub isKindOfClass:cls]) continue;
-        CGFloat top;
-        if (LSRDesiredTop(container, siblingIsTime, &top)) LSRMoveTop(sub, top);
-        return;
-    }
+static void LSRPlaceView(UIView *view, BOOL isTime) {
+    CGFloat top;
+    if (view && LSRTargetTop(view, isTime, view.bounds.size.height, &top)) LSRMoveTop(view, top);
+}
+
+static CGRect LSRAdjustedFrame(UIView *view, BOOL isTime, CGRect frame) {
+    CGFloat top;
+    if (LSRTargetTop(view, isTime, frame.size.height, &top)) frame.origin.y = top;
+    return frame;
+}
+
+static CGPoint LSRAdjustedCenter(UIView *view, BOOL isTime, CGPoint center) {
+    CGFloat height = view.bounds.size.height;
+    CGFloat top;
+    if (LSRTargetTop(view, isTime, height, &top)) center.y = top + height / 2.0;
+    return center;
 }
 
 %hook CSProminentTimeView
-// Covers a label that already had its font before being added here (setFont: hook above only
-// applies once the label is inside this view). Only assign when different.
+// Covers a label that already had its font before being added here (the setFont: hook below
+// only applies once the label is inside this view). Only assign when different.
 - (void)layoutSubviews {
     %orig;
     UILabel *label = self.textLabel;
@@ -153,34 +216,23 @@ static void LSRRepositionSibling(UIView *container, BOOL siblingIsTime) {
 }
 
 - (void)setFrame:(CGRect)frame {
-    UIView *container = self.superview;
-    if (sLSRApplying || !container) {
+    if (sLSRApplying) {
         %orig;
         return;
     }
-    LSRRecord(container, kLSRSysTimeTopKey, frame.origin.y);
-    CGFloat top;
-    if (LSRDesiredTop(container, YES, &top)) frame.origin.y = top;
     sLSRApplying = YES;
-    %orig(frame);
+    %orig(LSRAdjustedFrame(self, YES, frame));
     sLSRApplying = NO;
-    LSRRepositionSibling(container, NO);
 }
 
 - (void)setCenter:(CGPoint)center {
-    UIView *container = self.superview;
-    if (sLSRApplying || !container) {
+    if (sLSRApplying) {
         %orig;
         return;
     }
-    CGFloat height = self.bounds.size.height;
-    LSRRecord(container, kLSRSysTimeTopKey, center.y - height / 2.0);
-    CGFloat top;
-    if (LSRDesiredTop(container, YES, &top)) center.y = top + height / 2.0;
     sLSRApplying = YES;
-    %orig(center);
+    %orig(LSRAdjustedCenter(self, YES, center));
     sLSRApplying = NO;
-    LSRRepositionSibling(container, NO);
 }
 %end
 
@@ -206,8 +258,8 @@ static void LSRApplyIOS15Date(CSProminentSubtitleDateView *view) {
     if (!label) return;
     NSString *wanted = [LSRLongDateFormatter() stringFromDate:view.date ?: [NSDate date]];
     if (![label.text isEqualToString:wanted]) label.text = wanted;
-    UIFont *regular = [UIFont systemFontOfSize:kIOS15DateFontSize weight:UIFontWeightRegular];
-    if (![label.font isEqual:regular]) label.font = regular;
+    UIFont *font = LSRDateFont();
+    if (![label.font isEqual:font]) label.font = font;
 }
 
 // Something re-assigns the short "Sun Sep 27" text bypassing the view's own methods, so the
@@ -224,8 +276,7 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
     %orig(LSRIOS15DateTextForLabel(self, text));
 }
 
-// The time label gets its ~100pt font assigned directly (base font / customTimeFont hooks
-// didn't reach it), so size it here.
+// The time label gets iOS 16's font assigned directly (customTimeFont doesn't reach it).
 - (void)setFont:(UIFont *)font {
     if ([self.superview isKindOfClass:NSClassFromString(@"CSProminentTimeView")]) font = LSRClockFont();
     %orig(font);
@@ -243,34 +294,23 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
 
 %hook CSProminentSubtitleDateView
 - (void)setFrame:(CGRect)frame {
-    UIView *container = self.superview;
-    if (sLSRApplying || !container) {
+    if (sLSRApplying) {
         %orig;
         return;
     }
-    LSRRecord(container, kLSRSysDateTopKey, frame.origin.y);
-    CGFloat top;
-    if (LSRDesiredTop(container, NO, &top)) frame.origin.y = top;
     sLSRApplying = YES;
-    %orig(frame);
+    %orig(LSRAdjustedFrame(self, NO, frame));
     sLSRApplying = NO;
-    LSRRepositionSibling(container, YES);
 }
 
 - (void)setCenter:(CGPoint)center {
-    UIView *container = self.superview;
-    if (sLSRApplying || !container) {
+    if (sLSRApplying) {
         %orig;
         return;
     }
-    CGFloat height = self.bounds.size.height;
-    LSRRecord(container, kLSRSysDateTopKey, center.y - height / 2.0);
-    CGFloat top;
-    if (LSRDesiredTop(container, NO, &top)) center.y = top + height / 2.0;
     sLSRApplying = YES;
-    %orig(center);
+    %orig(LSRAdjustedCenter(self, NO, center));
     sLSRApplying = NO;
-    LSRRepositionSibling(container, YES);
 }
 
 - (void)setDate:(NSDate *)date {
@@ -302,8 +342,25 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
 %hook CSProminentDisplayView
 - (void)layoutSubviews {
     %orig;
+    sLSRDisplayView = self;
     BSUIVibrancyEffectView *vibrancy = self.vibrancyEffectView;
     if (vibrancy.isEnabled) vibrancy.isEnabled = NO;
+    // Frames set before the views were fully in the hierarchy couldn't be converted; place
+    // them again now that they are.
+    LSRPlaceView(self.timeView, YES);
+    LSRPlaceView(LSRFindSubview(self, NSClassFromString(@"CSProminentSubtitleDateView")), NO);
+
+    // Temporary subtitles ("Swipe up to unlock", ...) cross-fade with the date in iOS 16; keep
+    // them on the date's line instead of above the clock, where they'd hit the padlock.
+    CGFloat dateBaselineY = LSRCurrentLayout().dateBaselineY;
+    for (CSProminentTextElementView *subtitle in @[self.transientSubtitleView ?: [NSNull null],
+                                                   self.customSubtitleView ?: [NSNull null]]) {
+        if (![subtitle isKindOfClass:[UIView class]]) continue;
+        CGFloat top;
+        if (LSRTargetTopForBaseline(subtitle, dateBaselineY, subtitle.textLabel.font, subtitle.bounds.size.height, &top)) {
+            LSRMoveTop(subtitle, top);
+        }
+    }
 }
 %end
 
@@ -322,9 +379,10 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
 %hook SBUIProudLockIconView
 - (void)layoutSubviews {
     %orig;
-    // The 12x17pt glyph is only centered by its parent, never re-framed, so a transform is safe.
+    // The glyph is only centered by its parent, never re-framed, so a transform is safe.
     UIView *glyph = LSRFindSubview(self, NSClassFromString(@"BSUICAPackageView"));
-    CGAffineTransform t = CGAffineTransformMake(kIOS15PadlockScale, 0, 0, kIOS15PadlockScale, 0, kIOS15PadlockDrop);
+    LSRLayout layout = LSRCurrentLayout();
+    CGAffineTransform t = CGAffineTransformMake(layout.padlockScale, 0, 0, layout.padlockScale, 0, layout.padlockDrop);
     if (glyph && !CGAffineTransformEqualToTransform(glyph.transform, t)) glyph.transform = t;
 }
 
@@ -363,18 +421,19 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
 //
 // iOS 16 still ships the iOS 15 focus pill (CSFocusActivityView/-Indicator, added as an item of
 // the adjunct list under the clock); CSFocusActivityManager just decides to hide it. Re-enable
-// it, drop it below our moved date (the adjunct list starts where iOS 16's date area ended),
-// and remove iOS 16's replacement: the focus name + symbol at the bottom of the notification
-// list. The notification count in that bottom view is left alone.
+// it, move it below our date, and remove iOS 16's replacement: the focus name + symbol at the
+// bottom of the notification list. The notification count in that bottom view is left alone.
+//
+// Where the pill lands depends on where iOS starts the adjunct list, which differs per device.
+// So the pill measures its real distance to our date on every layout. Its item keeps iOS's
+// height: growing it through preferredContentSize fed back into itself (iOS writes the value it
+// reads back), so instead the item stops clipping. iOS leaves 26pt below each adjunct item, far
+// more than the few points the pill sticks out.
 
-// The pill sits at y≈213 by default; with the iOS 15 clock the date's glyphs end at y≈214, and
-// iOS 15 put the pill ~10pt below the date. With the iOS 16 clock the default spot is already
-// clear of the time.
-static const CGFloat kIOS15FocusPillDrop = 11.8;
+static const CGFloat kIOS15FocusPillGap = 10.0;
 
-static CGFloat LSRFocusPillDrop(void) {
-    return sLSRClockEnabled ? kIOS15FocusPillDrop : 0.0;
-}
+@interface CSFocusActivityView : UIView
+@end
 
 %group LSRFocus
 
@@ -385,17 +444,21 @@ static CGFloat LSRFocusPillDrop(void) {
 %end
 
 %hook CSFocusActivityView
-+ (CGSize)activityViewSize {
-    CGSize size = %orig;
-    size.height += LSRFocusPillDrop();
-    return size;
-}
-
 - (CGRect)_activityIndicatorFrame {
-    // The pill is vertically centered, so the taller view above already moves it down by
-    // half the extra height; add the other half here.
     CGRect frame = %orig;
-    frame.origin.y += LSRFocusPillDrop() / 2.0;
+    UIView *display = sLSRDisplayView;
+    if (!sLSRClockEnabled || !display || !self.window || display.window != self.window) return frame;
+
+    LSRLayout layout = LSRCurrentLayout();
+    CGFloat wantedTop = layout.dateBaselineY + kSFDescender * layout.dateFontSize + kIOS15FocusPillGap;
+    CGFloat itemTop = [self convertPoint:CGPointZero toView:display].y;
+    // Only ever move it down, never up into the date.
+    frame.origin.y = MAX(frame.origin.y, round((wantedTop - itemTop) * 3.0) / 3.0);
+
+    UIView *item = self.superview;
+    Class itemClass = NSClassFromString(@"CSAdjunctItemView");
+    while (item && ![item isKindOfClass:itemClass]) item = item.superview;
+    if (item.clipsToBounds) item.clipsToBounds = NO;
     return frame;
 }
 %end
@@ -460,4 +523,18 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     if (sLSRClockEnabled) %init(LSRClock);
     if (LSRPrefEnabled(prefs, @"focusEnabled")) %init(LSRFocus);
     if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);
+
+#ifdef DEBUG
+    // Debug builds: write the computed per-device layout for checking over SSH.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LSRLayout l = LSRCurrentLayout();
+        NSString *summary = [NSString stringWithFormat:
+            @"clockFontSize %.2f\ndateFontSize %.2f\ntimeBaselineY %.2f\ndateBaselineY %.2f\n"
+            @"padlockScale %.2f\npadlockDrop %.2f\nscreen %@\n",
+            l.clockFontSize, l.dateFontSize, l.timeBaselineY, l.dateBaselineY, l.padlockScale,
+            l.padlockDrop, NSStringFromCGRect([UIScreen mainScreen].bounds)];
+        [summary writeToFile:@"/var/mobile/Documents/LockScreenRestoreLayout-now.log" atomically:YES
+                    encoding:NSUTF8StringEncoding error:nil];
+    });
+#endif
 }
