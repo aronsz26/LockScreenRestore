@@ -64,6 +64,24 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
+			<string>Music player with the iOS 15 layout: large artwork, AirPlay next to the title, time under the progress bar and a volume slider.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>iOS 15 Music Player</string>
+			<key>key</key>
+			<string>mediaPlayerEnabled</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.aronsz26.lockscreenrestore</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
 			<string>iOS 15 live wallpapers with automatic Light/Dark switching. Press and hold the lock screen to play. Wallpapers aren't included: put them in /var/mobile/Library/LockScreenRestore/Wallpapers/&lt;Name&gt;/ as Light.heic, Light.mov, Dark.heic and Dark.mov.</string>
 		</dict>
 		<dict>

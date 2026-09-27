@@ -8,12 +8,28 @@
 //     -> LockScreenRestoreRecon-now.log: methods/ivars/properties of matching classes
 //   printf "CSCombinedListViewController topContentInset\n" > /var/mobile/Documents/lsr-call-request
 //     -> LockScreenRestoreCalls-now.log: result of a zero-argument getter on the live instance
-//        ("Class +selector" calls a class method; "Class a.b.c" follows a getter chain)
+//        ("Class +selector" calls a class method; "Class a.b.c" follows a getter chain;
+//        "Class setFoo: 3" calls a setter with a number, YES/NO or {struct})
+//   touch /var/mobile/Documents/lsr-snap-request
+//     -> LockScreenRestoreSnap-<n>.png: image of every visible window
+//
+// In MediaRemoteUI (the lock screen music player) the same files live in the app's sandboxed
+// tmp folder instead: find it with  find /var/mobile/Containers/Data -name lsr-debug-here
 
 #ifdef DEBUG
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+
+static NSString *LSRDebugPath(NSString *name) {
+    static NSString *dir;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        BOOL springBoard = [[NSProcessInfo processInfo].processName isEqualToString:@"SpringBoard"];
+        dir = springBoard ? @"/var/mobile/Documents" : NSTemporaryDirectory();
+    });
+    return [dir stringByAppendingPathComponent:name];
+}
 
 @interface UIWindow (LSRPrivate)
 + (NSArray *)allWindowsIncludingInternalWindows:(BOOL)includeInternal onlyVisibleWindows:(BOOL)onlyVisible;
@@ -70,7 +86,7 @@ static void LSRRunRecon(NSArray<NSString *> *fragments) {
         }
     }
     free(classes);
-    [out writeToFile:@"/var/mobile/Documents/LockScreenRestoreRecon-now.log" atomically:YES
+    [out writeToFile:LSRDebugPath(@"LockScreenRestoreRecon-now.log") atomically:YES
             encoding:NSUTF8StringEncoding error:nil];
 }
 
@@ -103,7 +119,7 @@ static void LSRDumpAllWindows(void) {
             window.windowLevel, window.hidden];
         LSRDumpView(window, 0, out);
     }
-    [out writeToFile:@"/var/mobile/Documents/LockScreenRestoreViews-now.log" atomically:YES
+    [out writeToFile:LSRDebugPath(@"LockScreenRestoreViews-now.log") atomically:YES
             encoding:NSUTF8StringEncoding error:nil];
 }
 
@@ -168,12 +184,47 @@ static NSString *LSRCallGetter(id target, SEL sel) {
     return [NSString stringWithFormat:@"<unsupported return type %s>", type];
 }
 
-// Request lines: "ClassName selector" -> LockScreenRestoreCalls-now.log
+// Calls a one-argument setter with a number, BOOL (YES/NO) or struct string ({1, 2} / {1, 2, 3, 4}).
+static NSString *LSRCallSetter(id target, SEL sel, NSString *arg) {
+    if (![target respondsToSelector:sel]) return @"<does not respond>";
+    NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+    if (sig.numberOfArguments != 3) return @"<not a one-argument setter>";
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.target = target;
+    inv.selector = sel;
+    const char *type = [sig getArgumentTypeAtIndex:2];
+    if (type[0] == 'B' || type[0] == 'c') { BOOL v = [arg boolValue]; [inv setArgument:&v atIndex:2]; }
+    else if (type[0] == 'd') { double v = [arg doubleValue]; [inv setArgument:&v atIndex:2]; }
+    else if (type[0] == 'f') { float v = [arg floatValue]; [inv setArgument:&v atIndex:2]; }
+    else if (strchr("qQlLiI", type[0])) { long long v = [arg longLongValue]; [inv setArgument:&v atIndex:2]; }
+    else if (strncmp(type, "{CGSize", 7) == 0) { CGSize v = CGSizeFromString(arg); [inv setArgument:&v atIndex:2]; }
+    else if (strncmp(type, "{UIEdgeInsets", 13) == 0) { UIEdgeInsets v = UIEdgeInsetsFromString(arg); [inv setArgument:&v atIndex:2]; }
+    else return [NSString stringWithFormat:@"<unsupported argument type %s>", type];
+    [inv invoke];
+    return @"done";
+}
+
+// Request lines: "ClassName selector" or "ClassName setter: value" -> LockScreenRestoreCalls-now.log
 static void LSRRunCalls(NSString *body) {
     NSMutableString *out = [NSMutableString new];
     for (NSString *line in [body componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
         NSArray *parts = [[line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
             componentsSeparatedByString:@" "];
+        if (parts.count >= 3 && [parts[1] hasSuffix:@":"]) {
+            Class cls = NSClassFromString(parts[0]);
+            id target = cls ? LSRFindLiveObject(cls) : nil;
+            NSString *arg = [[parts subarrayWithRange:NSMakeRange(2, parts.count - 2)] componentsJoinedByString:@" "];
+            NSString *result = @"<no live instance>";
+            if (target) {
+                @try {
+                    result = LSRCallSetter(target, NSSelectorFromString(parts[1]), arg);
+                } @catch (NSException *e) {
+                    result = [NSString stringWithFormat:@"<exception %@>", e.reason];
+                }
+            }
+            [out appendFormat:@"%@ %@ %@ -> %@\n", parts[0], parts[1], arg, result];
+            continue;
+        }
         if (parts.count != 2) continue;
         Class cls = NSClassFromString(parts[0]);
         // "+selector" calls a class method instead of looking for a live instance.
@@ -195,7 +246,7 @@ static void LSRRunCalls(NSString *body) {
         }
         [out appendFormat:@"%@ %@ = %@\n", parts[0], parts[1], result];
     }
-    [out writeToFile:@"/var/mobile/Documents/LockScreenRestoreCalls-now.log" atomically:YES
+    [out writeToFile:LSRDebugPath(@"LockScreenRestoreCalls-now.log") atomically:YES
             encoding:NSUTF8StringEncoding error:nil];
 }
 
@@ -250,22 +301,41 @@ static void LSRRunBurst(void) {
                 [e[@"first"] doubleValue], [e[@"last"] doubleValue], e[@"window"],
                 [[e[@"frames"] allObjects] componentsJoinedByString:@" "]];
         }
-        [out writeToFile:@"/var/mobile/Documents/LockScreenRestoreBurst-now.log" atomically:YES
+        [out writeToFile:LSRDebugPath(@"LockScreenRestoreBurst-now.log") atomically:YES
                 encoding:NSUTF8StringEncoding error:nil];
     }];
     (void)timer;
 }
 
+// Snapshot of every visible window -> LockScreenRestoreSnap-<n>.png (on a dark gray backdrop,
+// since the player's window itself is transparent).
+static void LSRSnapWindows(void) {
+    NSUInteger index = 0;
+    for (UIWindow *window in [UIWindow allWindowsIncludingInternalWindows:YES onlyVisibleWindows:NO]) {
+        if (window.hidden || window.bounds.size.width < 1) continue;
+        UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+        UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:window.bounds format:format];
+        UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            [[UIColor colorWithWhite:0.25 alpha:1] setFill];
+            UIRectFill(window.bounds);
+            [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:NO];
+        }];
+        NSString *name = [NSString stringWithFormat:@"LockScreenRestoreSnap-%lu.png", (unsigned long)index++];
+        [UIImagePNGRepresentation(image) writeToFile:LSRDebugPath(name) atomically:YES];
+    }
+}
+
 __attribute__((constructor)) static void LSRInstallDebugTools(void) {
+    [@"" writeToFile:LSRDebugPath(@"lsr-debug-here") atomically:YES encoding:NSUTF8StringEncoding error:nil];
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSTimer scheduledTimerWithTimeInterval:2.0 repeats:YES block:^(NSTimer *timer) {
             NSFileManager *fm = [NSFileManager defaultManager];
-            NSString *dumpRequest = @"/var/mobile/Documents/lsr-dump-request";
+            NSString *dumpRequest = LSRDebugPath(@"lsr-dump-request");
             if ([fm fileExistsAtPath:dumpRequest]) {
                 [fm removeItemAtPath:dumpRequest error:nil];
                 LSRDumpAllWindows();
             }
-            NSString *reconRequest = @"/var/mobile/Documents/lsr-recon-request";
+            NSString *reconRequest = LSRDebugPath(@"lsr-recon-request");
             if ([fm fileExistsAtPath:reconRequest]) {
                 NSString *body = [NSString stringWithContentsOfFile:reconRequest encoding:NSUTF8StringEncoding error:nil];
                 [fm removeItemAtPath:reconRequest error:nil];
@@ -276,12 +346,17 @@ __attribute__((constructor)) static void LSRInstallDebugTools(void) {
                 }
                 if (fragments.count) LSRRunRecon(fragments);
             }
-            NSString *burstRequest = @"/var/mobile/Documents/lsr-burst-request";
+            NSString *snapRequest = LSRDebugPath(@"lsr-snap-request");
+            if ([fm fileExistsAtPath:snapRequest]) {
+                [fm removeItemAtPath:snapRequest error:nil];
+                LSRSnapWindows();
+            }
+            NSString *burstRequest = LSRDebugPath(@"lsr-burst-request");
             if ([fm fileExistsAtPath:burstRequest]) {
                 [fm removeItemAtPath:burstRequest error:nil];
                 LSRRunBurst();
             }
-            NSString *callRequest = @"/var/mobile/Documents/lsr-call-request";
+            NSString *callRequest = LSRDebugPath(@"lsr-call-request");
             if ([fm fileExistsAtPath:callRequest]) {
                 NSString *body = [NSString stringWithContentsOfFile:callRequest encoding:NSUTF8StringEncoding error:nil];
                 [fm removeItemAtPath:callRequest error:nil];

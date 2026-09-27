@@ -1,14 +1,15 @@
 // LockScreenRestore — iOS 15 lock screen look on iOS 16 (rootless):
 // thin white clock, date below it as "Sunday, September 27", focus pill under the date, big
 // padlock that stays open after Face ID, notifications listed top-down under the clock, no
-// vibrancy tint, no depth effect, no widgets.
+// vibrancy tint, no depth effect, no widgets, iOS 15 music player, live wallpapers.
 //
 // Sizes and positions adapt to the device: they come from the per-device values SpringBoard
 // still carries from iOS 15 (SBFLockScreenMetrics) plus ratios measured against Apple's iOS 15
 // lock screen, and are converted with the real font metrics at runtime.
 //
-// Four independently switchable groups (Settings > LockScreenRestore, all on by default),
-// applied at SpringBoard launch — the settings page has a respring button.
+// Independently switchable groups (Settings > LockScreenRestore, all on by default), applied at
+// SpringBoard launch — the settings page has a respring button. The music player part runs in
+// MediaRemoteUI, which restarts with SpringBoard.
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -24,6 +25,31 @@ static NSString *const kLSRPrefsPaths[] = {
     @"/var/mobile/Library/Preferences/com.aronsz26.lockscreenrestore.plist",
 };
 static BOOL sLSRClockEnabled = YES;
+
+// Debug builds log to LockScreenRestoreDebug.log.
+#ifdef DEBUG
+static void LSRDebugLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
+static void LSRDebugLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *line = [NSString stringWithFormat:@"%.2f %@\n", CACurrentMediaTime(), [[NSString alloc] initWithFormat:format arguments:args]];
+    va_end(args);
+    // MediaRemoteUI is sandboxed: its log goes to its own tmp folder.
+    BOOL springBoard = [[NSProcessInfo processInfo].processName isEqualToString:@"SpringBoard"];
+    NSString *path = [springBoard ? @"/var/mobile/Documents" : NSTemporaryDirectory()
+        stringByAppendingPathComponent:@"LockScreenRestoreDebug.log"];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) {
+        [line writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [fh seekToEndOfFile];
+    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
+}
+#else
+#define LSRDebugLog(...) do {} while (0)
+#endif
 
 @interface SBFLockScreenDateView : UIView
 + (UIFont *)timeFont;
@@ -527,6 +553,23 @@ static const CGFloat kIOS15CardInsetReduction = 4.0;
 @interface NCNotificationSeamlessContentView : UIView
 @end
 
+static const CGFloat kIOS15ListInset = 8.0;
+static const CGFloat kIOS16ListInset = 10.0;
+
+@interface ACUISSizeDimensionRequest : NSObject
++ (instancetype)fixed:(CGFloat)value;
+@property (readonly, nonatomic) CGFloat minimum;
+@property (readonly, nonatomic) CGFloat maximum;
+@end
+
+@interface ACUISActivityItemMetricsRequest : NSObject <NSCopying>
+@property (nonatomic, strong) ACUISSizeDimensionRequest *widthRequest;
+@end
+
+@interface ACUISActivityMetricsRequest : NSObject <NSCopying>
+@property (nonatomic, copy) ACUISActivityItemMetricsRequest *lockScreenMetrics;
+@end
+
 %group LSRNotifications
 
 %hook NCNotificationListView
@@ -542,7 +585,26 @@ static const CGFloat kIOS15CardInsetReduction = 4.0;
 // iOS 15 cards had ~8pt side margins (measured 8.6pt incl. anti-aliasing); iOS 16 uses 10.
 %hook CSCombinedListViewController
 - (CGFloat)horizontalInsetMargin {
-    return 8.0;
+    return kIOS15ListInset;
+}
+%end
+
+// Live Activities (like the music player) get a fixed width from the activity metrics, made
+// for iOS 16's 10pt margins; widen them to fill the wider platter.
+%hook ACUISActivityHostViewControllerFactory
++ (id)activityHostViewControllerWithDescriptor:(id)descriptor sceneType:(NSInteger)type metricsRequest:(ACUISActivityMetricsRequest *)request {
+    ACUISActivityItemMetricsRequest *lockScreen = request.lockScreenMetrics;
+    ACUISSizeDimensionRequest *width = lockScreen.widthRequest;
+    LSRDebugLog(@"activity metrics request: width %.1f..%.1f", width.minimum, width.maximum);
+    if (width && fabs(width.minimum - width.maximum) < 0.01) {
+        CGFloat wider = width.maximum + 2.0 * (kIOS16ListInset - kIOS15ListInset);
+        ACUISActivityMetricsRequest *adjusted = [request copy];
+        ACUISActivityItemMetricsRequest *adjustedLockScreen = [lockScreen copy];
+        adjustedLockScreen.widthRequest = [%c(ACUISSizeDimensionRequest) fixed:wider];
+        adjusted.lockScreenMetrics = adjustedLockScreen;
+        request = adjusted;
+    }
+    return %orig(descriptor, type, request);
 }
 %end
 
@@ -614,26 +676,6 @@ static const CGFloat kIOS15CardInsetReduction = 4.0;
 static NSString *const kLSRWallpapersDir = @"/var/mobile/Library/LockScreenRestore/Wallpapers";
 static NSString *sLSRWallpaperDesignDir = nil;
 
-#ifdef DEBUG
-static void LSRDebugLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
-static void LSRDebugLog(NSString *format, ...) {
-    va_list args;
-    va_start(args, format);
-    NSString *line = [NSString stringWithFormat:@"%.2f %@\n", CACurrentMediaTime(), [[NSString alloc] initWithFormat:format arguments:args]];
-    va_end(args);
-    NSString *path = @"/var/mobile/Documents/LockScreenRestoreDebug.log";
-    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
-    if (!fh) {
-        [line writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:nil];
-        return;
-    }
-    [fh seekToEndOfFile];
-    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-    [fh closeFile];
-}
-#else
-#define LSRDebugLog(...) do {} while (0)
-#endif
 
 static NSString *LSRWallpaperVariant(UITraitCollection *traits) {
     return traits.userInterfaceStyle == UIUserInterfaceStyleDark ? @"Dark" : @"Light";
@@ -953,6 +995,464 @@ static NSString *LSRResolveWallpaperDesignDir(NSDictionary *prefs) {
     return nil;
 }
 
+#pragma mark - Group: iOS 15 music player (runs in MediaRemoteUI)
+
+// On iOS 16 the lock screen player is a Live Activity: MediaRemoteUI draws it in its own scene
+// and SpringBoard only shows that scene inside a notification-list platter. MRUNowPlayingView
+// has context 2 there. Its iOS 16 layout (artwork + title in one row, time labels beside the
+// bar, AirPlay among the buttons, no volume) is replaced with iOS 15's, measured on Apple's
+// iOS 15 lock screen (all values in pt from the platter's top left, 390pt wide screen):
+//   artwork 100x100 at 16,16 (corner radius 3)
+//   text column from x 128: route ("iPhone") baseline 52, title baseline 70, subtitle 87.8
+//   AirPlay button centered 33.6 from the right edge, level with the artwork's center
+//   progress bar center y 138.2, 16 from both edges, 4 thick, 8pt knob; times baseline 157.8, 12pt
+//   buttons center y 191.1, 98 apart
+//   volume bar center y 244.6 from x 58 to 59.6 before the right edge, 24pt knob; speaker icons
+//   centered 37.6 / 37.3 from the edges
+//   platter height 281
+static const NSInteger kMRUContextCoverSheet = 2;
+static const CGFloat kIOS15PlayerHeight = 281.0;
+static const CGFloat kIOS15PlayerInset = 16.0;
+static const CGFloat kIOS15ArtworkSize = 100.0;
+static const CGFloat kIOS15ArtworkCornerRadius = 3.0;
+static const CGFloat kIOS15TextLeft = 128.0;
+static const CGFloat kIOS15HeaderTop = 40.0;
+static const CGFloat kIOS15HeaderHeight = 54.0;
+static const CGFloat kIOS15RoutingCenterFromRight = 33.6;
+static const CGFloat kIOS15RouteBaseline = 52.0;
+static const CGFloat kIOS15TitleBaseline = 70.0;
+static const CGFloat kIOS15SubtitleBaseline = 87.8;
+static const CGFloat kIOS15TimeBarCenterY = 138.2;
+static const CGFloat kIOS15TimeLabelBaseline = 157.8;
+static const CGFloat kIOS15TimeLabelFontSize = 12.0;
+static const CGFloat kIOS15TransportCenterY = 191.1;
+static const CGFloat kIOS15TransportSpacing = 98.0;
+static const CGFloat kIOS15VolumeCenterY = 244.6;
+static const CGFloat kIOS15VolumeBarLeft = 58.0;
+static const CGFloat kIOS15VolumeBarRightInset = 59.6;
+static const CGFloat kIOS15VolumeMinIconCenter = 37.6;
+static const CGFloat kIOS15VolumeMaxIconCenterFromRight = 37.3;
+static const CGFloat kIOS15SliderThickness = 4.0;
+static const CGFloat kIOS15TimeKnobSize = 8.0;
+static const CGFloat kIOS15VolumeKnobSize = 24.0;
+// iOS 15's glyphs were bigger: play/pause 34pt tall (iOS 16: 27.4), previous/next 35pt wide (32).
+static const CGFloat kIOS15PlayGlyphScale = 1.25;
+static const CGFloat kIOS15SkipGlyphScale = 1.1;
+
+@interface MRUSlider : UIControl
+@property (nonatomic, strong) UIView *minTrack;
+@property (nonatomic) float value;
+@property (nonatomic) float minimumValue;
+@property (nonatomic) float maximumValue;
+@end
+
+@interface MRUArtworkView : UIControl
+@property (nonatomic, strong) UIImageView *artworkImageView;
+@property (nonatomic, strong) UIView *artworkShadowView;
+@property (nonatomic, strong) UIView *placeholderBackground;
+@end
+
+@interface MRUNowPlayingLabelView : UIControl
+@property (nonatomic, copy) NSString *subtitle;
+@property (nonatomic, strong) UIView *routeLabel;
+@property (nonatomic, strong) UIView *titleMarqueeView;
+@property (nonatomic, strong) UIView *subtitleMarqueeView;
+@property (nonatomic, strong) UIView *placeholderMarqueeView;
+@end
+
+@interface MRUNowPlayingHeaderView : UIView
+@property (nonatomic, strong) MRUNowPlayingLabelView *labelView;
+@property (nonatomic, strong) UIView *routingButton;
+@property (nonatomic, strong) UIView *waveformView;
+@property (nonatomic) BOOL showRoutingButton;
+@property (nonatomic) BOOL showTransportButton;
+@property (nonatomic) BOOL showWaveform;
+@end
+
+@interface MRUNowPlayingTimeControlsView : UIView
+@property (nonatomic, strong) MRUSlider *slider;
+@property (nonatomic, strong) UILabel *elapsedTimeLabel;
+@property (nonatomic, strong) UILabel *remainingTimeLabel;
+@property (nonatomic, strong) UILabel *liveLabel;
+@end
+
+@interface MRUNowPlayingTransportControlsView : UIView
+@property (nonatomic, strong) UIView *leftButton;
+@property (nonatomic, strong) UIView *centerButton;
+@property (nonatomic, strong) UIView *rightButton;
+@property (nonatomic) BOOL showRoutingButton;
+@end
+
+@interface MRUNowPlayingVolumeControlsView : UIView
+@property (nonatomic, strong) MRUSlider *slider;
+@property (nonatomic, strong) UIImageView *minImageView;
+@property (nonatomic, strong) UIImageView *maxImageView;
+@end
+
+@interface MRUNowPlayingView : UIView
+@property (nonatomic) NSInteger context;
+@property (nonatomic) BOOL showVolumeControlsView;
+@property (nonatomic, strong) MRUArtworkView *artworkView;
+@property (nonatomic, strong) MRUNowPlayingHeaderView *headerView;
+@property (nonatomic, strong) MRUNowPlayingTimeControlsView *timeControlsView;
+@property (nonatomic, strong) MRUNowPlayingTransportControlsView *transportControlsView;
+@property (nonatomic, strong) MRUNowPlayingVolumeControlsView *volumeControlsView;
+@end
+
+@interface MRUNowPlayingInfo : NSObject
+@property (nonatomic, strong) NSString *artist;
+@property (nonatomic, strong) NSString *album;
+@end
+
+@interface MRUMetadataController : NSObject
+@property (readonly, nonatomic) MRUNowPlayingInfo *nowPlayingInfo;
+@end
+
+@interface MRUNowPlayingController : NSObject
+@property (readonly, nonatomic) MRUMetadataController *metadataController;
+@end
+
+@interface MRUNowPlayingViewController : UIViewController
+@property (nonatomic) NSInteger context;
+@property (nonatomic, strong) MRUNowPlayingController *controller;
+@end
+
+static BOOL LSRIsLockScreenPlayer(MRUNowPlayingView *view) {
+    return view.context == kMRUContextCoverSheet;
+}
+
+// The lock screen player a view belongs to, or nil.
+static MRUNowPlayingView *LSRLockScreenPlayerFor(UIView *view) {
+    static Class playerClass;
+    if (!playerClass) playerClass = NSClassFromString(@"MRUNowPlayingView");
+    for (UIView *v = view; v; v = v.superview) {
+        if ([v isKindOfClass:playerClass]) return LSRIsLockScreenPlayer((MRUNowPlayingView *)v) ? (MRUNowPlayingView *)v : nil;
+    }
+    return nil;
+}
+
+// Only touch frames that differ, so our layout never re-triggers a layout pass.
+static void LSRSetFrame(UIView *view, CGRect frame) {
+    if (!view) return;
+    CGRect current = view.frame;
+    if (fabs(current.origin.x - frame.origin.x) > 0.01 || fabs(current.origin.y - frame.origin.y) > 0.01
+        || fabs(current.size.width - frame.size.width) > 0.01 || fabs(current.size.height - frame.size.height) > 0.01) {
+        view.frame = frame;
+    }
+}
+
+static void LSRSetCenter(UIView *view, CGPoint center) {
+    if (!view) return;
+    CGSize size = view.bounds.size;
+    LSRSetFrame(view, CGRectMake(center.x - size.width / 2.0, center.y - size.height / 2.0, size.width, size.height));
+}
+
+// Top of a label (or a view holding one) whose text baseline should sit at `baseline`.
+static CGFloat LSRTopForBaseline(CGFloat baseline, UIFont *font) {
+    return baseline - (font ? font.ascender : 0.0);
+}
+
+static UILabel *LSRFirstLabelIn(UIView *view) {
+    if ([view isKindOfClass:[UILabel class]]) return (UILabel *)view;
+    for (UIView *sub in view.subviews) {
+        UILabel *found = LSRFirstLabelIn(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+
+// iOS 15's white round knob on the progress and volume bars (iOS 16 has none).
+static const void *kLSRKnobKey = &kLSRKnobKey;
+
+static void LSRUpdateKnob(MRUSlider *slider) {
+    UIView *knob = objc_getAssociatedObject(slider, kLSRKnobKey);
+    MRUNowPlayingView *player = LSRLockScreenPlayerFor(slider);
+    if (!player) {
+        knob.hidden = YES;
+        return;
+    }
+    BOOL volume = [slider.superview isKindOfClass:NSClassFromString(@"MRUNowPlayingVolumeControlsView")];
+    CGFloat size = volume ? kIOS15VolumeKnobSize : kIOS15TimeKnobSize;
+    if (!knob) {
+        knob = [[UIView alloc] initWithFrame:CGRectMake(0, 0, size, size)];
+        knob.userInteractionEnabled = NO;
+        knob.backgroundColor = [UIColor whiteColor];
+        knob.layer.cornerRadius = size / 2.0;
+        if (volume) {
+            knob.layer.shadowColor = [UIColor blackColor].CGColor;
+            knob.layer.shadowOpacity = 0.2f;
+            knob.layer.shadowRadius = 4.0;
+            knob.layer.shadowOffset = CGSizeMake(0, 1);
+        }
+        objc_setAssociatedObject(slider, kLSRKnobKey, knob, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (knob.superview != slider) [slider addSubview:knob];
+    if (slider.subviews.lastObject != knob) [slider bringSubviewToFront:knob];
+    knob.hidden = NO;
+
+    CGFloat range = slider.maximumValue - slider.minimumValue;
+    CGFloat fraction = range > 0 ? (slider.value - slider.minimumValue) / range : 0.0;
+    fraction = MIN(MAX(fraction, 0.0), 1.0);
+    CGRect bounds = slider.bounds;
+    // The knob stays inside the bar's ends, like iOS 15's.
+    CGFloat x = size / 2.0 + fraction * MAX(0.0, bounds.size.width - size);
+    LSRSetCenter(knob, CGPointMake(x, CGRectGetMidY(bounds)));
+}
+
+static void LSRUpdateSliderTouchTarget(MRUSlider *slider) {
+    // The bar is thinner than iOS 16's; keep it easy to grab.
+    if (slider.bounds.size.height < 20.0) {
+        CGFloat pad = -(22.0 - slider.bounds.size.height / 2.0);
+        UIEdgeInsets insets = UIEdgeInsetsMake(pad, -8.0, pad, -8.0);
+        if ([slider respondsToSelector:@selector(setHitRectInset:)]) {
+            ((void (*)(id, SEL, UIEdgeInsets))objc_msgSend)(slider, @selector(setHitRectInset:), insets);
+        }
+    }
+}
+
+// What iOS 15 showed that iOS 16's lock screen layout hides: volume slider, route label
+// ("iPhone"), AirPlay in the header instead of among the buttons, no waveform/mini play button.
+static void LSREnforcePlayerVisibility(MRUNowPlayingView *player) {
+    if (!player.showVolumeControlsView) player.showVolumeControlsView = YES;
+    MRUNowPlayingHeaderView *header = player.headerView;
+    if (!header.showRoutingButton) header.showRoutingButton = YES;
+    if (header.showTransportButton) header.showTransportButton = NO;
+    if (header.showWaveform) header.showWaveform = NO;
+    MRUNowPlayingTransportControlsView *transport = player.transportControlsView;
+    if (transport.showRoutingButton) transport.showRoutingButton = NO;
+}
+
+%group LSRMediaPlayer
+
+%hook MRUNowPlayingViewController
+- (BOOL)showRouteLabel {
+    if (self.context == kMRUContextCoverSheet) return YES;
+    return %orig;
+}
+
+// iOS 16 shows only the artist under the title; iOS 15 showed "Artist — Album".
+- (void)updateNowPlayingInfo {
+    %orig;
+    if (self.context != kMRUContextCoverSheet) return;
+    MRUNowPlayingInfo *info = self.controller.metadataController.nowPlayingInfo;
+    if (!info.artist.length || !info.album.length) return;
+    UIView *view = self.viewIfLoaded;
+    if (![view isKindOfClass:NSClassFromString(@"MRUNowPlayingView")]) return;
+    MRUNowPlayingLabelView *labelView = ((MRUNowPlayingView *)view).headerView.labelView;
+    if (![labelView.subtitle isEqualToString:info.artist]) return;
+    labelView.subtitle = [NSString stringWithFormat:@"%@ \u2014 %@", info.artist, info.album];
+}
+%end
+
+%hook MRUNowPlayingView
+- (CGSize)sizeThatFits:(CGSize)size {
+    CGSize fitting = %orig;
+    if (!LSRIsLockScreenPlayer(self)) return fitting;
+    return CGSizeMake(fitting.width, kIOS15PlayerHeight);
+}
+
+- (void)layoutSubviews {
+    if (LSRIsLockScreenPlayer(self)) LSREnforcePlayerVisibility(self);
+    %orig;
+    if (!LSRIsLockScreenPlayer(self)) return;
+
+    CGFloat width = self.bounds.size.width;
+    CGFloat inset = kIOS15PlayerInset;
+    LSRSetFrame(self.artworkView, CGRectMake(inset, inset, kIOS15ArtworkSize, kIOS15ArtworkSize));
+    CGFloat headerRight = width - kIOS15RoutingCenterFromRight + 22.0;
+    LSRSetFrame(self.headerView, CGRectMake(kIOS15TextLeft, kIOS15HeaderTop,
+        headerRight - kIOS15TextLeft, kIOS15HeaderHeight));
+    LSRSetFrame(self.timeControlsView, CGRectMake(inset, kIOS15TimeBarCenterY - 22.0, width - 2.0 * inset, 44.0));
+    LSRSetFrame(self.transportControlsView, CGRectMake(0, kIOS15TransportCenterY - 22.0, width, 44.0));
+    LSRSetFrame(self.volumeControlsView, CGRectMake(0, kIOS15VolumeCenterY - 22.0, width, 44.0));
+    self.volumeControlsView.alpha = 1.0;
+}
+%end
+
+%hook MRUArtworkView
+- (void)layoutSubviews {
+    %orig;
+    if (!LSRLockScreenPlayerFor(self)) return;
+    for (UIView *view in @[self.artworkImageView ?: [NSNull null], self.artworkShadowView ?: [NSNull null],
+                           self.placeholderBackground ?: [NSNull null]]) {
+        if (![view isKindOfClass:[UIView class]]) continue;
+        if (fabs(view.layer.cornerRadius - kIOS15ArtworkCornerRadius) > 0.01) view.layer.cornerRadius = kIOS15ArtworkCornerRadius;
+    }
+}
+%end
+
+// Header: labels on the left, AirPlay on the right, level with the artwork's center.
+%hook MRUNowPlayingHeaderView
+- (void)layoutSubviews {
+    %orig;
+    if (!LSRLockScreenPlayerFor(self)) return;
+    CGSize size = self.bounds.size;
+    CGFloat artworkCenterY = kIOS15PlayerInset + kIOS15ArtworkSize / 2.0 - kIOS15HeaderTop;
+    LSRSetFrame(self.routingButton, CGRectMake(size.width - 44.0, artworkCenterY - 22.0, 44.0, 44.0));
+    LSRSetFrame(self.labelView, CGRectMake(0, 0, size.width - 52.0, size.height));
+    // iOS 16's lock screen layout never shows this button, so nothing fades it in.
+    if (self.routingButton.alpha < 1.0) self.routingButton.alpha = 1.0;
+    // iOS 16's "playing" waveform dots above the AirPlay button.
+    if (!self.waveformView.hidden) self.waveformView.hidden = YES;
+}
+
+- (void)updateVisibility {
+    %orig;
+    if (LSRLockScreenPlayerFor(self) && self.routingButton.alpha < 1.0) self.routingButton.alpha = 1.0;
+}
+%end
+
+// Three lines: route, title, subtitle.
+%hook MRUNowPlayingLabelView
+- (void)layoutSubviews {
+    %orig;
+    if (!LSRLockScreenPlayerFor(self)) return;
+    CGFloat width = self.bounds.size.width;
+    UIView *route = self.routeLabel;
+    if (route) {
+        UILabel *label = LSRFirstLabelIn(route);
+        CGFloat height = route.bounds.size.height > 0 ? route.bounds.size.height : 13.33;
+        LSRSetFrame(route, CGRectMake(0, LSRTopForBaseline(kIOS15RouteBaseline - kIOS15HeaderTop, label.font),
+            MIN(width, MAX(route.bounds.size.width, [route sizeThatFits:CGSizeMake(width, height)].width)), height));
+        if (route.alpha < 1.0) route.alpha = 1.0;
+    }
+    for (UIView *line in @[self.titleMarqueeView ?: [NSNull null], self.placeholderMarqueeView ?: [NSNull null]]) {
+        if (![line isKindOfClass:[UIView class]]) continue;
+        LSRSetFrame(line, CGRectMake(0, LSRTopForBaseline(kIOS15TitleBaseline - kIOS15HeaderTop, LSRFirstLabelIn(line).font),
+            width, line.bounds.size.height));
+    }
+    UIView *subtitle = self.subtitleMarqueeView;
+    if (subtitle) {
+        LSRSetFrame(subtitle, CGRectMake(0, LSRTopForBaseline(kIOS15SubtitleBaseline - kIOS15HeaderTop, LSRFirstLabelIn(subtitle).font),
+            width, subtitle.bounds.size.height));
+    }
+}
+%end
+
+// Progress bar across the full width, times below it.
+%hook MRUNowPlayingTimeControlsView
+- (void)layoutSubviews {
+    %orig;
+    if (!LSRLockScreenPlayerFor(self)) return;
+    CGSize size = self.bounds.size;
+    CGFloat barCenterY = size.height / 2.0;
+    LSRSetFrame(self.slider, CGRectMake(0, barCenterY - kIOS15SliderThickness / 2.0, size.width, kIOS15SliderThickness));
+    CGFloat baseline = barCenterY + (kIOS15TimeLabelBaseline - kIOS15TimeBarCenterY);
+    for (UILabel *label in @[self.elapsedTimeLabel ?: [NSNull null], self.remainingTimeLabel ?: [NSNull null],
+                             self.liveLabel ?: [NSNull null]]) {
+        if (![label isKindOfClass:[UILabel class]]) continue;
+        if (fabs(label.font.pointSize - kIOS15TimeLabelFontSize) > 0.01) {
+            label.font = [label.font fontWithSize:kIOS15TimeLabelFontSize];
+        }
+        CGSize fit = [label sizeThatFits:CGSizeMake(size.width, CGFLOAT_MAX)];
+        CGFloat x = 0;
+        if (label == self.remainingTimeLabel) x = size.width - fit.width;
+        else if (label == self.liveLabel) x = (size.width - fit.width) / 2.0;
+        LSRSetFrame(label, CGRectMake(x, LSRTopForBaseline(baseline, label.font), fit.width, fit.height));
+    }
+}
+%end
+
+// Previous, play/pause, next — 98pt apart around the center.
+%hook MRUNowPlayingTransportControlsView
+- (void)layoutSubviews {
+    %orig;
+    if (!LSRLockScreenPlayerFor(self)) return;
+    CGSize size = self.bounds.size;
+    CGFloat centerX = size.width / 2.0, centerY = size.height / 2.0;
+    LSRSetCenter(self.leftButton, CGPointMake(centerX - kIOS15TransportSpacing, centerY));
+    LSRSetCenter(self.centerButton, CGPointMake(centerX, centerY));
+    LSRSetCenter(self.rightButton, CGPointMake(centerX + kIOS15TransportSpacing, centerY));
+    // Scales the glyph around the button's center without touching the button's frame.
+    NSArray *buttons = @[self.leftButton ?: [NSNull null], self.centerButton ?: [NSNull null], self.rightButton ?: [NSNull null]];
+    for (NSUInteger i = 0; i < buttons.count; i++) {
+        UIView *button = buttons[i];
+        if (![button isKindOfClass:[UIView class]]) continue;
+        CGFloat scale = i == 1 ? kIOS15PlayGlyphScale : kIOS15SkipGlyphScale;
+        CATransform3D wanted = CATransform3DMakeScale(scale, scale, 1.0);
+        if (!CATransform3DEqualToTransform(button.layer.sublayerTransform, wanted)) button.layer.sublayerTransform = wanted;
+    }
+}
+%end
+
+// Speaker icons at both ends, volume bar between them.
+%hook MRUNowPlayingVolumeControlsView
+- (void)layoutSubviews {
+    %orig;
+    if (!LSRLockScreenPlayerFor(self)) return;
+    CGSize size = self.bounds.size;
+    CGFloat centerY = size.height / 2.0;
+    LSRSetCenter(self.minImageView, CGPointMake(kIOS15VolumeMinIconCenter, centerY));
+    LSRSetCenter(self.maxImageView, CGPointMake(size.width - kIOS15VolumeMaxIconCenterFromRight, centerY));
+    LSRSetFrame(self.slider, CGRectMake(kIOS15VolumeBarLeft, centerY - kIOS15SliderThickness / 2.0,
+        size.width - kIOS15VolumeBarLeft - kIOS15VolumeBarRightInset, kIOS15SliderThickness));
+}
+%end
+
+// iOS 15's played part of the bar is solid white (iOS 16: half transparent).
+static void LSRBrightenSliderFill(MRUSlider *slider) {
+    UIView *fill = slider.minTrack;
+    if (fill && fill.alpha < 1.0) fill.alpha = 1.0;
+}
+
+%hook MRUSlider
+- (void)layoutSubviews {
+    %orig;
+    if (!LSRLockScreenPlayerFor(self)) return;
+    LSRUpdateSliderTouchTarget(self);
+    LSRBrightenSliderFill(self);
+    LSRUpdateKnob(self);
+}
+
+- (void)updateVisualStyling {
+    %orig;
+    if (LSRLockScreenPlayerFor(self)) LSRBrightenSliderFill(self);
+}
+
+- (void)setValue:(float)value {
+    %orig;
+    if (LSRLockScreenPlayerFor(self)) LSRUpdateKnob(self);
+}
+
+- (void)setValue:(float)value animated:(BOOL)animated {
+    %orig;
+    if (LSRLockScreenPlayerFor(self)) LSRUpdateKnob(self);
+}
+%end
+
+%end // LSRMediaPlayer
+
+// SpringBoard side: the platter around the player (and any other Live Activity) gets iOS 15's
+// 13pt corners like the notification cards; iOS 16 uses 23.5 for the platter, its material
+// and the hosted scene view inside it.
+@interface NCNotificationListSupplementaryHostingView : UIView
+@end
+
+static void LSRRoundActivityPlatter(UIView *view, NSUInteger depth) {
+    CGFloat radius = view.layer.cornerRadius;
+    if (radius > kIOS15CardCornerRadius + 0.01 && radius < 30.0) {
+        view.layer.cornerRadius = kIOS15CardCornerRadius;
+        view.layer.cornerCurve = kCACornerCurveContinuous;
+    }
+    if (depth >= 10) return;
+    for (UIView *sub in view.subviews) LSRRoundActivityPlatter(sub, depth + 1);
+}
+
+%group LSRMediaPlatter
+
+%hook NCNotificationListSupplementaryHostingView
+- (void)_setContinuousCornerRadius:(CGFloat)radius {
+    %orig(kIOS15CardCornerRadius);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    LSRRoundActivityPlatter(self, 0);
+}
+%end
+
+%end // LSRMediaPlatter
+
 #pragma mark - Settings
 
 // Missing file/key = never touched in Settings = on (the default).
@@ -966,10 +1466,20 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     for (size_t i = 0; i < sizeof(kLSRPrefsPaths) / sizeof(kLSRPrefsPaths[0]) && !prefs; i++) {
         prefs = [NSDictionary dictionaryWithContentsOfFile:kLSRPrefsPaths[i]];
     }
+
+    // Also loaded into MediaRemoteUI, which draws the lock screen music player on iOS 16.
+    NSString *process = [NSProcessInfo processInfo].processName;
+    if ([process isEqualToString:@"MediaRemoteUI"]) {
+        LSRDebugLog(@"MediaRemoteUI prefs readable: %d", prefs != nil);
+        if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlayer);
+        return;
+    }
+    if (![process isEqualToString:@"SpringBoard"]) return;
     sLSRClockEnabled = LSRPrefEnabled(prefs, @"clockEnabled");
     if (sLSRClockEnabled) %init(LSRClock);
     if (LSRPrefEnabled(prefs, @"focusEnabled")) %init(LSRFocus);
     if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);
+    if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlatter);
     if (LSRPrefEnabled(prefs, @"liveWallpaperEnabled")) {
         sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
         if (sLSRWallpaperDesignDir) %init(LSRWallpaper);

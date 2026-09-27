@@ -27,6 +27,11 @@ Every part can be switched on and off separately in Settings.
   - Notifications listed right under the clock instead of collected at the bottom of the screen
   - iOS 15's narrower side margins
   - iOS 15 card shape: smaller rounded corners (13 pt instead of 23.5 pt), tighter padding, one-line cards 58 pt tall instead of 66 pt, app icon always vertically centered
+- **iOS 15 Music Player**
+  - The iOS 15 layout on the lock screen: large artwork, device name above the title, AirPlay next to the title
+  - Progress bar with a knob and the times below it, bigger play/pause, previous and next buttons
+  - Volume slider (iOS 16 removed it from the lock screen)
+  - "Artist — Album" under the title instead of only the artist
 - **iOS 15 Live Wallpaper**
   - Live wallpapers are back (iOS 16 removed them): press and hold the lock screen to play
   - Switches automatically between the Light and Dark version with the system appearance
@@ -42,6 +47,7 @@ Every part can be switched on and off separately in Settings.
 | iOS 15 Clock | On |
 | iOS 15 Focus | On |
 | iOS 15 Notifications | On |
+| iOS 15 Music Player | On |
 | iOS 15 Live Wallpaper | On (does nothing until wallpapers are added) |
 | Wallpaper | Pick one of the wallpapers you added |
 
@@ -130,7 +136,8 @@ make package FINALPACKAGE=1 install
 - Notification text follows **Settings → Display & Brightness → Text Size**. Apple's iOS 15 screenshots use the default size.
 - With **iOS 15 Live Wallpaper** on, the long press no longer opens iOS 16's lock screen editor.
 - Stacked vs. list view still follows **Settings → Notifications → Display As**.
-- Other tweaks that change the lock screen clock, padlock or notification list may conflict.
+- Some apps send their own text for the music player (Spotify Connect shows "Listening on …"); that text is shown as the app sends it.
+- Other tweaks that change the lock screen clock, padlock, notification list or music player may conflict.
 
 ## License
 
