@@ -2,10 +2,6 @@
 #import <Preferences/PSSpecifier.h>
 #import <sys/sysctl.h>
 
-@interface PSSpecifier (LSRPrivate)
-- (void)setValues:(NSArray *)values titles:(NSArray *)titles;
-@end
-
 @interface FBSSystemService : NSObject
 + (instancetype)sharedService;
 - (void)sendActions:(NSSet *)actions withResult:(id)result;
@@ -60,37 +56,52 @@ static NSString *LSRDeviceName(NSString *model) {
 - (NSArray *)specifiers {
     if (!_specifiers) {
         _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
-        [self _fillWallpaperDesigns];
     }
     return _specifiers;
 }
 
-// One entry per folder that has at least a Light.heic; the tweak falls back to the first one
-// when nothing has been picked yet, so that's the default here too.
-- (void)_fillWallpaperDesigns {
-    PSSpecifier *picker = [self specifierForID:@"wallpaperDesign"];
-    for (PSSpecifier *specifier in _specifiers) {
-        if ([[specifier propertyForKey:@"key"] isEqualToString:@"wallpaperDesign"]) picker = specifier;
-    }
-    if (!picker) return;
+// The tweak reads the plist straight from disk when SpringBoard starts, but cfprefsd keeps
+// changes in memory and writes the file whenever it likes (a respring could still see a state
+// from hours ago). So write the file ourselves on every change: what cfprefsd has, plus the
+// value that just changed. Rootless jailbreaks keep it under /var/jb.
+static NSString *const kLSRDomain = @"com.aronsz26.lockscreenrestore";
 
-    NSString *root = @"/var/mobile/Library/LockScreenRestore/Wallpapers";
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableArray *designs = [NSMutableArray new];
-    for (NSString *name in [[fm contentsOfDirectoryAtPath:root error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
-        NSString *still = [[root stringByAppendingPathComponent:name] stringByAppendingPathComponent:@"Light.heic"];
-        if ([fm fileExistsAtPath:still]) [designs addObject:name];
+static NSString *LSRPrefsFilePath(void) {
+    NSString *name = [kLSRDomain stringByAppendingPathExtension:@"plist"];
+    NSString *rootless = @"/var/jb/var/mobile/Library/Preferences";
+    BOOL isDir = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:rootless isDirectory:&isDir] && isDir) {
+        return [rootless stringByAppendingPathComponent:name];
     }
-    if (!designs.count) [designs addObject:@"None found"];
-    if (![picker respondsToSelector:@selector(setValues:titles:)]) return;
-    [picker setValues:designs titles:designs];
-    [picker setProperty:designs.firstObject forKey:@"default"];
+    return [@"/var/mobile/Library/Preferences" stringByAppendingPathComponent:name];
 }
 
-// The tweak picks its hook groups at SpringBoard launch (reading the plist from disk), so flush
-// the switches to disk first, then respring.
+static void LSRWritePrefsFile(NSString *changedKey, id changedValue) {
+    CFStringRef domain = (__bridge CFStringRef)kLSRDomain;
+    CFPreferencesAppSynchronize(domain);
+    NSString *path = LSRPrefsFilePath();
+    NSMutableDictionary *prefs = [NSMutableDictionary dictionaryWithContentsOfFile:path] ?: [NSMutableDictionary new];
+    CFArrayRef keys = CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+    if (keys) {
+        NSDictionary *current = CFBridgingRelease(CFPreferencesCopyMultiple(keys, domain,
+            kCFPreferencesCurrentUser, kCFPreferencesAnyHost));
+        [prefs addEntriesFromDictionary:current];
+        CFRelease(keys);
+    }
+    if (changedKey) {
+        if (changedValue) prefs[changedKey] = changedValue;
+        else [prefs removeObjectForKey:changedKey];
+    }
+    [prefs writeToFile:path atomically:YES];
+}
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
+    [super setPreferenceValue:value specifier:specifier];
+    LSRWritePrefsFile([specifier propertyForKey:@"key"], value);
+}
+
 - (void)respring {
-    CFPreferencesAppSynchronize(CFSTR("com.aronsz26.lockscreenrestore"));
+    LSRWritePrefsFile(nil, nil);
     SBSRelaunchAction *action = [SBSRelaunchAction actionWithReason:@"RestartRenderServer"
                                                             options:kLSRRelaunchFadeToBlack
                                                           targetURL:nil];

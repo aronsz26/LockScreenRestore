@@ -1,1 +1,1 @@
-{ Filter = { Executables = ( "SpringBoard", "MediaRemoteUI" ); }; }
+{ Filter = { Executables = ( "SpringBoard", "MediaRemoteUI", "Preferences" ); }; }

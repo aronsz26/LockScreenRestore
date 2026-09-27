@@ -12,9 +12,9 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = LockScreenRestore
 
-LockScreenRestore_FILES = Tweak.xm DebugTools.m
+LockScreenRestore_FILES = Tweak.xm LSRWallpaperPane.xm DebugTools.m
 LockScreenRestore_CFLAGS = -fobjc-arc
-LockScreenRestore_FRAMEWORKS = UIKit Foundation CoreText AVFoundation CoreMedia
+LockScreenRestore_FRAMEWORKS = UIKit Foundation CoreText AVFoundation CoreMedia ImageIO
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

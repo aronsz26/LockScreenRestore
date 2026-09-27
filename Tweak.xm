@@ -469,6 +469,83 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
 }
 %end
 
+#pragma mark - Charging battery in place of the clock
+//
+// On plug-in iOS fades out time and date and shows "60% Charged" over a big battery. iOS 16
+// centers that on its own clock, which puts the text right under our bigger padlock; iOS 15
+// showed it where the clock was. Shift it so it's centered on our time + date block. A
+// translation on the charging view (full-screen, clear) moves label and battery together
+// without fighting their Auto Layout; the getter/setter pair keeps it out of iOS's own
+// transforms.
+
+@interface CSBatteryChargingView : UIView
+@end
+
+@interface _CSSingleBatteryChargingView : CSBatteryChargingView
+@end
+
+@interface _CSDoubleBatteryChargingView : CSBatteryChargingView
+@end
+
+static const void *kLSRChargingShiftKey = &kLSRChargingShiftKey;
+
+static CGFloat LSRChargingShift(UIView *view) {
+    return [objc_getAssociatedObject(view, kLSRChargingShiftKey) doubleValue];
+}
+
+static void LSRUpdateChargingShift(UIView *view) {
+    CGRect content = CGRectNull;
+    for (UIView *sub in view.subviews) {
+        if (sub.hidden || CGRectIsEmpty(sub.frame)) continue;
+        content = CGRectUnion(content, sub.frame);
+    }
+    if (CGRectIsNull(content)) return;
+
+    LSRLayout layout = LSRCurrentLayout();
+    CGFloat clockTop = layout.timeBaselineY - kSFDigitHeight * layout.clockFontSize;
+    CGFloat dateBottom = layout.dateBaselineY + kSFDescender * layout.dateFontSize;
+    CGFloat shift = round((clockTop + dateBottom) / 2.0 - CGRectGetMidY(content));
+    if (fabs(shift - LSRChargingShift(view)) < 0.5) return;
+
+    CGAffineTransform own = view.transform;
+    objc_setAssociatedObject(view, kLSRChargingShiftKey, @(shift), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    view.transform = own;
+    LSRDebugLog(@"charging view %@ content %@ shift %.1f", NSStringFromClass([view class]),
+        NSStringFromCGRect(content), shift);
+}
+
+%hook CSBatteryChargingView
+- (void)didMoveToWindow {
+    %orig;
+    LSRUpdateChargingShift(self);
+}
+
+- (void)setTransform:(CGAffineTransform)transform {
+    transform.ty += LSRChargingShift(self);
+    %orig(transform);
+}
+
+- (CGAffineTransform)transform {
+    CGAffineTransform t = %orig;
+    t.ty -= LSRChargingShift(self);
+    return t;
+}
+%end
+
+%hook _CSSingleBatteryChargingView
+- (void)layoutSubviews {
+    %orig;
+    LSRUpdateChargingShift(self);
+}
+%end
+
+%hook _CSDoubleBatteryChargingView
+- (void)layoutSubviews {
+    %orig;
+    LSRUpdateChargingShift(self);
+}
+%end
+
 %end // LSRClock
 
 #pragma mark - Group: iOS 15 focus pill
@@ -570,6 +647,43 @@ static const CGFloat kIOS16ListInset = 10.0;
 @property (nonatomic, copy) ACUISActivityItemMetricsRequest *lockScreenMetrics;
 @end
 
+@interface NCNotificationListSectionHeaderView : UIView
+@property (nonatomic, weak) id delegate;
+@end
+
+@interface NCNotificationListView : UIScrollView
+@property (nonatomic, strong) UIView *headerView;
+@property (nonatomic) CGFloat revealPercentage;
+- (BOOL)isRevealed;
+@end
+
+// The history section ("Notification Centre" + X) fades its notifications with the reveal but
+// leaves its header at full alpha: on iOS 16 that header waits below the screen's bottom edge
+// until you swipe up. Listed from the top it sits right under the clock, so give the header
+// the same reveal alpha as the notifications below it (iOS 15 only showed it after a swipe up).
+static BOOL LSRIsHistoryHeader(UIView *header) {
+    if (![header isKindOfClass:NSClassFromString(@"NCNotificationListSectionHeaderView")]) return NO;
+    id section = ((NCNotificationListSectionHeaderView *)header).delegate;
+    return [section respondsToSelector:@selector(isHistorySection)]
+        && ((BOOL (*)(id, SEL))objc_msgSend)(section, @selector(isHistorySection));
+}
+
+// Highest alpha the history header may have right now: its list's reveal progress. Views
+// outside a history list aren't limited.
+static CGFloat LSRHistoryHeaderMaxAlpha(UIView *header) {
+    NCNotificationListView *list = (NCNotificationListView *)header.superview;
+    if (![list isKindOfClass:NSClassFromString(@"NCNotificationListView")] || list.headerView != header
+        || !LSRIsHistoryHeader(header)) return 1.0;
+    return list.isRevealed ? 1.0 : MIN(MAX(list.revealPercentage, 0.0), 1.0);
+}
+
+static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
+    UIView *header = list.headerView;
+    if (!LSRIsHistoryHeader(header)) return;
+    CGFloat alpha = LSRHistoryHeaderMaxAlpha(header);
+    if (fabs(header.alpha - alpha) > 0.001) header.alpha = alpha;
+}
+
 %group LSRNotifications
 
 %hook NCNotificationListView
@@ -580,7 +694,31 @@ static const CGFloat kIOS16ListInset = 10.0;
 - (void)setLayoutFromBottom:(BOOL)layoutFromBottom {
     %orig(NO);
 }
+
+- (void)layoutSubviews {
+    %orig;
+    LSRApplyHistoryHeaderReveal(self);
+}
+
+- (void)setRevealPercentage:(CGFloat)percentage {
+    %orig;
+    LSRApplyHistoryHeaderReveal(self);
+}
+
+- (void)setRevealed:(BOOL)revealed {
+    %orig;
+    LSRApplyHistoryHeaderReveal(self);
+}
 %end
+
+// iOS also sets the header's alpha itself (e.g. fading it in while unlocking, with the history
+// still closed); never let it rise above the reveal progress.
+%hook NCNotificationListSectionHeaderView
+- (void)setAlpha:(CGFloat)alpha {
+    %orig(MIN(alpha, LSRHistoryHeaderMaxAlpha(self)));
+}
+%end
+
 
 // iOS 15 cards had ~8pt side margins (measured 8.6pt incl. anti-aliasing); iOS 16 uses 10.
 %hook CSCombinedListViewController
@@ -675,6 +813,19 @@ static const CGFloat kIOS16ListInset = 10.0;
 
 static NSString *const kLSRWallpapersDir = @"/var/mobile/Library/LockScreenRestore/Wallpapers";
 static NSString *sLSRWallpaperDesignDir = nil;
+// Settings > Wallpaper "Set Home Screen"; nil = the home screen shows the lock screen's design.
+static NSString *sLSRHomeDesignDir = nil;
+// The wallpaper window serves both screens: the lock screen's design while the cover sheet is
+// up, the home screen's once it goes away. (While it slides, the cover sheet carries its own
+// copy of the lock screen wallpaper, see LSRCoverWithStill.)
+static BOOL sLSRShowingLockScreen = YES;
+// "Dark Appearance Dims Wallpaper" (Settings > Wallpaper).
+static BOOL sLSRDimInDark = NO;
+// Posted in SpringBoard after Settings picked another design or toggled dimming.
+static NSString *const kLSRWallpaperReloadNotification = @"LSRWallpaperReload";
+static NSMutableDictionary<NSString *, UIImage *> *sLSRStillCache;
+// iOS 15 dimmed by roughly a quarter in the dark.
+static const CGFloat kLSRDarkDimAlpha = 0.25;
 
 
 static NSString *LSRWallpaperVariant(UITraitCollection *traits) {
@@ -683,17 +834,26 @@ static NSString *LSRWallpaperVariant(UITraitCollection *traits) {
 
 // Decoded once per variant: the same still is shown by several views (the wallpaper window and
 // the copies iOS slides around during lock/unlock).
-static UIImage *LSRWallpaperStill(NSString *variant) {
-    static NSMutableDictionary<NSString *, UIImage *> *cache;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ cache = [NSMutableDictionary new]; });
-    UIImage *image = cache[variant];
+static UIImage *LSRWallpaperStillIn(NSString *dir, NSString *variant) {
+    if (!dir) return nil;
+    if (!sLSRStillCache) sLSRStillCache = [NSMutableDictionary new];
+    NSString *path = [[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"heic"];
+    UIImage *image = sLSRStillCache[path];
     if (!image) {
-        NSString *path = [[sLSRWallpaperDesignDir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"heic"];
         image = [UIImage imageWithContentsOfFile:path];
-        if (image) cache[variant] = image;
+        if (image) sLSRStillCache[path] = image;
     }
     return image;
+}
+
+// The lock screen's still (what the cover sheet's own copies show).
+static UIImage *LSRWallpaperStill(NSString *variant) {
+    return LSRWallpaperStillIn(sLSRWallpaperDesignDir, variant);
+}
+
+// What the wallpaper window shows right now.
+static NSString *LSRWindowDesignDir(void) {
+    return !sLSRShowingLockScreen && sLSRHomeDesignDir ? sLSRHomeDesignDir : sLSRWallpaperDesignDir;
 }
 
 @interface LSRLiveWallpaperView : UIView
@@ -703,9 +863,11 @@ static UIImage *LSRWallpaperStill(NSString *variant) {
 
 @implementation LSRLiveWallpaperView {
     UIImageView *_imageView;
+    UIView *_dimView;
     AVPlayer *_player;
     AVPlayerLayer *_playerLayer;
     NSString *_loadedVariant;
+    NSString *_loadedDir;
     NSURL *_videoURL;
     BOOL _wantsVideoVisible;
 }
@@ -732,6 +894,12 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_videoDidEnd:)
                                                      name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
         [_playerLayer addObserver:self forKeyPath:@"readyForDisplay" options:0 context:kLSRReadyForDisplayContext];
+        _dimView = [[UIView alloc] initWithFrame:self.bounds];
+        _dimView.backgroundColor = [UIColor blackColor];
+        _dimView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self addSubview:_dimView];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_reload)
+                                                     name:kLSRWallpaperReloadNotification object:nil];
         [self _loadCurrentVariant];
     }
     return self;
@@ -770,12 +938,24 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     [self _loadCurrentVariant];
 }
 
+- (void)_reload {
+    _loadedVariant = nil;
+    _loadedDir = nil;
+    [self _loadCurrentVariant];
+}
+
 - (void)_loadCurrentVariant {
     NSString *variant = LSRWallpaperVariant(self.traitCollection);
-    if ([variant isEqualToString:_loadedVariant]) return;
+    // Above the video too, so a playing wallpaper stays dimmed.
+    _dimView.alpha = sLSRDimInDark && [variant isEqualToString:@"Dark"] ? kLSRDarkDimAlpha : 0.0;
+    [self bringSubviewToFront:_dimView];
+    _dimView.layer.zPosition = 1;
+    NSString *dir = LSRWindowDesignDir();
+    if ([variant isEqualToString:_loadedVariant] && [dir isEqualToString:_loadedDir]) return;
     _loadedVariant = variant;
-    _imageView.image = LSRWallpaperStill(variant);
-    _videoURL = [NSURL fileURLWithPath:[[sLSRWallpaperDesignDir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]];
+    _loadedDir = dir;
+    _imageView.image = LSRWallpaperStillIn(dir, variant);
+    _videoURL = [NSURL fileURLWithPath:[[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]];
     [self stopVideo];
 }
 
@@ -820,9 +1000,25 @@ static __weak LSRLiveWallpaperView *sLSRWallpaperView = nil;
 @end
 
 @implementation LSRStillCoverView
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_reload)
+                                                     name:kLSRWallpaperReloadNotification object:nil];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)_reload {
+    self.image = LSRWallpaperStill(LSRWallpaperVariant(self.traitCollection));
+}
+
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
-    self.image = LSRWallpaperStill(LSRWallpaperVariant(self.traitCollection));
+    [self _reload];
 }
 @end
 
@@ -945,6 +1141,21 @@ static void LSRCoverWithStill(UIView *effectView) {
     [self.view addGestureRecognizer:press];
 }
 
+// Lock screen fully up: its design. Starting to go away: the home screen's design underneath.
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (sLSRShowingLockScreen) return;
+    sLSRShowingLockScreen = YES;
+    if (sLSRHomeDesignDir) [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    %orig;
+    if (!sLSRShowingLockScreen) return;
+    sLSRShowingLockScreen = NO;
+    if (sLSRHomeDesignDir) [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
+}
+
 - (void)_setupPosterSwitcherGestureRecognizer {
 }
 
@@ -978,6 +1189,14 @@ static void LSRCoverWithStill(UIView *effectView) {
 
 %end // LSRWallpaper
 
+// The home screen's design folder, nil when none was picked (then it shows the lock screen's).
+static NSString *LSRResolveHomeDesignDir(NSDictionary *prefs) {
+    NSString *chosen = prefs[@"homeWallpaperDesign"];
+    if (![chosen isKindOfClass:[NSString class]] || !chosen.length) return nil;
+    NSString *dir = [kLSRWallpapersDir stringByAppendingPathComponent:chosen];
+    return [[NSFileManager defaultManager] fileExistsAtPath:[dir stringByAppendingPathComponent:@"Light.heic"]] ? dir : nil;
+}
+
 // The chosen design's folder, or the first one available; nil if there are none.
 static NSString *LSRResolveWallpaperDesignDir(NSDictionary *prefs) {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -989,10 +1208,33 @@ static NSString *LSRResolveWallpaperDesignDir(NSDictionary *prefs) {
     NSArray *designs = [[fm contentsOfDirectoryAtPath:kLSRWallpapersDir error:nil]
         sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
     for (NSString *design in designs) {
+        if ([design hasPrefix:@"."]) continue;  // .Photo only when picked
         NSString *dir = [kLSRWallpapersDir stringByAppendingPathComponent:design];
         if ([fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"Light.heic"]]) return dir;
     }
     return nil;
+}
+
+static NSDictionary *LSRReadPrefs(void) {
+    NSDictionary *prefs = nil;
+    for (size_t i = 0; i < sizeof(kLSRPrefsPaths) / sizeof(kLSRPrefsPaths[0]) && !prefs; i++) {
+        prefs = [NSDictionary dictionaryWithContentsOfFile:kLSRPrefsPaths[i]];
+    }
+    return prefs;
+}
+
+// Settings > Wallpaper picked another design or toggled dimming: swap it in without a respring.
+static void LSRWallpaperPrefsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name,
+                                     const void *object, CFDictionaryRef userInfo) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSDictionary *prefs = LSRReadPrefs();
+        NSString *dir = LSRResolveWallpaperDesignDir(prefs);
+        if (dir) sLSRWallpaperDesignDir = dir;
+        sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);
+        sLSRDimInDark = [prefs[@"dimWallpaperInDark"] boolValue];
+        [sLSRStillCache removeAllObjects];
+        [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
+    });
 }
 
 #pragma mark - Group: iOS 15 music player (runs in MediaRemoteUI)
@@ -1482,7 +1724,14 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlatter);
     if (LSRPrefEnabled(prefs, @"liveWallpaperEnabled")) {
         sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
-        if (sLSRWallpaperDesignDir) %init(LSRWallpaper);
+        sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);
+        sLSRDimInDark = [prefs[@"dimWallpaperInDark"] boolValue];
+        if (sLSRWallpaperDesignDir) {
+            %init(LSRWallpaper);
+            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+                LSRWallpaperPrefsChanged, CFSTR("com.aronsz26.lockscreenrestore/wallpaper"), NULL,
+                CFNotificationSuspensionBehaviorDeliverImmediately);
+        }
     }
 
 #ifdef DEBUG
