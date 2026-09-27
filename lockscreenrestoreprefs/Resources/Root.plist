@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>title</key>
+	<string>LockScreenRestore</string>
+	<key>items</key>
+	<array>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Padlock, time and date with iOS 15 sizes and positions, plain white instead of tinted, no depth effect.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>iOS 15 Clock</string>
+			<key>key</key>
+			<string>clockEnabled</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.aronsz26.lockscreenrestore</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Focus shown as a pill under the date instead of at the bottom of the screen.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>iOS 15 Focus</string>
+			<key>key</key>
+			<string>focusEnabled</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.aronsz26.lockscreenrestore</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Notifications listed right under the clock instead of anchored at the bottom.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>iOS 15 Notifications</string>
+			<key>key</key>
+			<string>notificationsEnabled</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.aronsz26.lockscreenrestore</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Changes take effect after a respring.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Apply (Respring)</string>
+			<key>action</key>
+			<string>respring</string>
+		</dict>
+	</array>
+</dict>
+</plist>
