@@ -516,6 +516,17 @@ static const CGFloat kIOS15FocusPillGap = 10.0;
 // iOS 16 lays the lock screen notification list out from the bottom up
 // (NCNotificationListView.layoutFromBottom); iOS 15 listed them top-down under the date.
 
+static const CGFloat kIOS15CardCornerRadius = 13.0;
+static const CGFloat kIOS15CardInsetReduction = 4.0;
+
+@interface NCNotificationShortLookView : UIView
+- (CGFloat)_continuousCornerRadius;
+- (void)_setContinuousCornerRadius:(CGFloat)radius;
+@end
+
+@interface NCNotificationSeamlessContentView : UIView
+@end
+
 %group LSRNotifications
 
 %hook NCNotificationListView
@@ -532,6 +543,60 @@ static const CGFloat kIOS15FocusPillGap = 10.0;
 %hook CSCombinedListViewController
 - (CGFloat)horizontalInsetMargin {
     return 8.0;
+}
+%end
+
+// Card shape, measured on Apple's iOS 15 lock screen: 13pt corners (iOS 16: 23.5), and every
+// inner inset 4pt tighter — icon 10pt from the edges (iOS 16: 14), date 13pt from the right
+// (17), one-line card 58pt tall (66). Instead of re-implementing iOS 16's layout, let it lay
+// out (and measure) for a size 8pt larger than the real one, then view it through a bounds
+// origin of (4,4) so everything shows 4pt up and left: every inset shrinks by exactly 4pt and
+// the measured height follows. (iOS lays out from (0,0) and ignores the bounds' origin; moving
+// the subviews themselves added up, since iOS doesn't re-place all of them every pass.)
+%hook NCNotificationSeamlessContentView
+- (void)_layoutSubviewInBounds:(CGRect)bounds measuringOnly:(CGSize *)measuredSize {
+    CGFloat reduction = kIOS15CardInsetReduction;
+    CGRect enlarged = bounds;
+    enlarged.size.width += 2.0 * reduction;
+    enlarged.size.height += 2.0 * reduction;
+    %orig(enlarged, measuredSize);
+    if (measuredSize) {
+        measuredSize->width = MAX(0.0, measuredSize->width - 2.0 * reduction);
+        measuredSize->height = MAX(0.0, measuredSize->height - 2.0 * reduction);
+        return;
+    }
+    CGRect viewBounds = self.bounds;
+    if (!CGPointEqualToPoint(viewBounds.origin, CGPointMake(reduction, reduction))) {
+        viewBounds.origin = CGPointMake(reduction, reduction);
+        self.bounds = viewBounds;
+    }
+    // iOS 16 top-aligns the icon with the title on taller cards; iOS 15 always centered it.
+    CGFloat wantedCenterY = CGRectGetMidY(viewBounds);
+    for (UIView *subview in self.subviews) {
+        if (![NSStringFromClass([subview class]) containsString:@"BadgedIconView"]) continue;
+        CGPoint center = subview.center;
+        if (fabs(center.y - wantedCenterY) > 0.01) subview.center = CGPointMake(center.x, wantedCenterY);
+    }
+}
+%end
+
+%hook NCNotificationShortLookView
+- (void)_setContinuousCornerRadius:(CGFloat)radius {
+    %orig(kIOS15CardCornerRadius);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    if (fabs(self._continuousCornerRadius - kIOS15CardCornerRadius) > 0.01) {
+        [self _setContinuousCornerRadius:kIOS15CardCornerRadius];
+    }
+    // The dimming layer on cards stacked behind another one keeps its own radius.
+    Ivar ivar = class_getInstanceVariable(object_getClass(self), "_stackDimmingOverlayView");
+    UIView *dimming = ivar ? object_getIvar(self, ivar) : nil;
+    if (dimming && fabs(dimming.layer.cornerRadius - kIOS15CardCornerRadius) > 0.01) {
+        dimming.layer.cornerRadius = kIOS15CardCornerRadius;
+        dimming.layer.cornerCurve = kCACornerCurveContinuous;
+    }
 }
 %end
 

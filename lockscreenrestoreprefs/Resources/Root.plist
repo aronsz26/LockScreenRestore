@@ -46,7 +46,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>Notifications listed right under the clock instead of anchored at the bottom.</string>
+			<string>Notifications listed right under the clock instead of anchored at the bottom, with iOS 15 card shape and spacing.</string>
 		</dict>
 		<dict>
 			<key>cell</key>

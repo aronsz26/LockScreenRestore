@@ -3,9 +3,11 @@
 Brings the iOS 15 lock screen back to iOS 16.
 
 <p align="center">
-  <img src="screenshots/lockscreen.jpg" width="300" alt="Lock screen with the iOS 15 clock, date and Focus pill">
-  &nbsp;&nbsp;
-  <img src="screenshots/notifications.jpg" width="300" alt="Notifications listed under the clock like on iOS 15">
+  <img src="screenshots/lockscreen.jpg" width="250" alt="Lock screen with the iOS 15 clock and padlock">
+  &nbsp;
+  <img src="screenshots/notifications.jpg" width="250" alt="Notifications listed under the clock with iOS 15 cards">
+  &nbsp;
+  <img src="screenshots/settings.jpg" width="250" alt="LockScreenRestore settings">
 </p>
 
 ## Features
@@ -24,6 +26,7 @@ Every part can be switched on and off separately in Settings.
 - **iOS 15 Notifications**
   - Notifications listed right under the clock instead of collected at the bottom of the screen
   - iOS 15's narrower side margins
+  - iOS 15 card shape: smaller rounded corners (13 pt instead of 23.5 pt), tighter padding, one-line cards 58 pt tall instead of 66 pt, app icon always vertically centered
 - **iOS 15 Live Wallpaper**
   - Live wallpapers are back (iOS 16 removed them): press and hold the lock screen to play
   - Switches automatically between the Light and Dark version with the system appearance
@@ -124,7 +127,7 @@ make package FINALPACKAGE=1 install
 
 ## Known limitations
 
-- Notification banners keep iOS 16's style.
+- Notification text follows **Settings → Display & Brightness → Text Size**. Apple's iOS 15 screenshots use the default size.
 - With **iOS 15 Live Wallpaper** on, the long press no longer opens iOS 16's lock screen editor.
 - Stacked vs. list view still follows **Settings → Notifications → Display As**.
 - Other tweaks that change the lock screen clock, padlock or notification list may conflict.
