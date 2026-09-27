@@ -817,8 +817,206 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
 
 #pragma mark - Settings: grid
 
+#pragma mark - Settings: wallpapers to download
+
+// Apple's wallpapers, archived at github.com/SniperGER/iOS-Wallpapers, downloaded on request
+// into the wallpapers folder (nothing of Apple's ships with the tweak). Files are named
+// "<id>.<Name>_<Light|Dark|Day|Night>-<w>w-<h>h@<s>x~iphone.<heic|png|jpg|mov>"; only the ones
+// made for this screen (or the closest size there is) are offered.
+static NSString *const kLSRRemoteTreeURL = @"https://api.github.com/repos/SniperGER/iOS-Wallpapers/git/trees/master?recursive=1";
+static NSString *const kLSRRemoteRawBase = @"https://raw.githubusercontent.com/SniperGER/iOS-Wallpapers/master/";
+
+@interface LSRRemoteDesign : NSObject
+@property (nonatomic, copy) NSString *name;
+// variant ("Light" / "Dark") -> repository path of the still / the video
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *stills;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *videos;
+@property (nonatomic, readonly) BOOL live;
+@end
+
+@implementation LSRRemoteDesign
+- (BOOL)live {
+    return self.videos.count > 0 && self.videos.count == self.stills.count;
+}
+@end
+
+static NSURL *LSRRemoteURL(NSString *path) {
+    NSString *escaped = [path stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLPathAllowedCharacterSet]];
+    return [NSURL URLWithString:[kLSRRemoteRawBase stringByAppendingString:escaped]];
+}
+
+static NSString *LSRRemoteCacheDir(void) {
+    NSString *dir = @"/var/mobile/Library/Caches/LockScreenRestore";
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    return dir;
+}
+
+// Designs for this screen from the repository's file list.
+static NSArray<LSRRemoteDesign *> *LSRRemoteDesignsFromTree(NSArray *tree) {
+    NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:
+        @"^iPhone/[^/]+/[^/]+/(?:Live|Stills)/\\d+\\.(.+?)-(\\d+)w-(\\d+)h@(\\d)x~iphone\\.(heic|png|jpg|mov)$" options:0 error:nil];
+    NSMutableDictionary<NSString *, NSMutableArray *> *bySize = [NSMutableDictionary new];
+    for (NSDictionary *entry in tree) {
+        NSString *path = entry[@"path"];
+        if (![entry[@"type"] isEqualToString:@"blob"] || ![path hasPrefix:@"iPhone/"]) continue;
+        NSTextCheckingResult *match = [pattern firstMatchInString:path options:0 range:NSMakeRange(0, path.length)];
+        if (!match) continue;
+        NSString *size = [NSString stringWithFormat:@"%@x%@@%@", [path substringWithRange:[match rangeAtIndex:2]],
+            [path substringWithRange:[match rangeAtIndex:3]], [path substringWithRange:[match rangeAtIndex:4]]];
+        if (!bySize[size]) bySize[size] = [NSMutableArray new];
+        [bySize[size] addObject:@[path, [path substringWithRange:[match rangeAtIndex:1]], [path substringWithRange:[match rangeAtIndex:5]]]];
+    }
+    // This screen's files, else the closest size.
+    CGSize screen = [UIScreen mainScreen].bounds.size;
+    CGFloat w = MIN(screen.width, screen.height), h = MAX(screen.width, screen.height), scale = [UIScreen mainScreen].scale;
+    NSString *best = nil;
+    CGFloat bestDistance = CGFLOAT_MAX;
+    for (NSString *size in bySize) {
+        NSArray *parts = [size componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"x@"]];
+        CGFloat distance = fabs([parts[0] doubleValue] - w) + fabs([parts[1] doubleValue] - h) + ([parts[2] doubleValue] == scale ? 0 : 1000);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = size;
+        }
+    }
+    if (!best) return @[];
+
+    NSMutableDictionary<NSString *, LSRRemoteDesign *> *designs = [NSMutableDictionary new];
+    NSRegularExpression *model = [NSRegularExpression regularExpressionWithPattern:@"-[A-Z]\\d+" options:0 error:nil];
+    for (NSArray *file in bySize[best]) {
+        NSString *raw = [model stringByReplacingMatchesInString:file[1] options:0 range:NSMakeRange(0, [file[1] length]) withTemplate:@""];
+        NSString *variant = nil;
+        for (NSArray *suffix in @[@[@"_Light", @"Light"], @[@"_Day", @"Light"], @[@"_Dark", @"Dark"], @[@"_Night", @"Dark"]]) {
+            if ([raw hasSuffix:suffix[0]]) {
+                variant = suffix[1];
+                raw = [raw substringToIndex:raw.length - [suffix[0] length]];
+                break;
+            }
+        }
+        NSString *name = [[raw stringByReplacingOccurrencesOfString:@"_" withString:@" "]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (!name.length) continue;
+        LSRRemoteDesign *design = designs[name];
+        if (!design) {
+            design = [LSRRemoteDesign new];
+            design.name = name;
+            design.stills = [NSMutableDictionary new];
+            design.videos = [NSMutableDictionary new];
+            designs[name] = design;
+        }
+        NSMutableDictionary *target = [file[2] isEqualToString:@"mov"] ? design.videos : design.stills;
+        target[variant ?: @"Light"] = file[0];
+    }
+    return [[designs allValues] sortedArrayUsingComparator:^NSComparisonResult(LSRRemoteDesign *a, LSRRemoteDesign *b) {
+        return [a.name localizedStandardCompare:b.name];
+    }];
+}
+
+// The file list, fetched once a day (GitHub allows 60 unauthenticated requests an hour).
+static void LSRLoadRemoteDesigns(void (^completion)(NSArray<LSRRemoteDesign *> *designs)) {
+    NSString *cache = [LSRRemoteCacheDir() stringByAppendingPathComponent:@"tree.json"];
+    NSDate *modified = [[NSFileManager defaultManager] attributesOfItemAtPath:cache error:nil].fileModificationDate;
+    void (^finish)(NSData *) = ^(NSData *data) {
+        NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        NSArray *tree = [json isKindOfClass:[NSDictionary class]] ? json[@"tree"] : nil;
+        NSArray *designs = [tree isKindOfClass:[NSArray class]] ? LSRRemoteDesignsFromTree(tree) : @[];
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(designs); });
+    };
+    if (modified && -modified.timeIntervalSinceNow < 24 * 3600) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ finish([NSData dataWithContentsOfFile:cache]); });
+        return;
+    }
+    [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:kLSRRemoteTreeURL]
+                                 completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (data && [(NSHTTPURLResponse *)response statusCode] == 200) {
+            [data writeToFile:cache atomically:YES];
+        } else {
+            data = [NSData dataWithContentsOfFile:cache];  // offline or rate limited: last list
+        }
+        finish(data);
+    }] resume];
+}
+
+// Everything the design needs, into Wallpapers/<Name>/ (one variant only: used for both).
+static void LSRDownloadRemoteDesign(LSRRemoteDesign *design, void (^completion)(BOOL ok)) {
+    NSMutableArray<NSArray *> *jobs = [NSMutableArray new];  // @[repository path, file name]
+    for (NSString *variant in @[@"Light", @"Dark"]) {
+        NSString *still = design.stills[variant] ?: design.stills.allValues.firstObject;
+        if (still) [jobs addObject:@[still, [variant stringByAppendingPathExtension:@"heic"]]];
+        if (design.live) {
+            NSString *video = design.videos[variant] ?: design.videos.allValues.firstObject;
+            if (video) [jobs addObject:@[video, [variant stringByAppendingPathExtension:@"mov"]]];
+        }
+    }
+    NSString *staging = [LSRRemoteCacheDir() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+    [[NSFileManager defaultManager] createDirectoryAtPath:staging withIntermediateDirectories:YES attributes:nil error:nil];
+    dispatch_group_t group = dispatch_group_create();
+    __block BOOL ok = jobs.count > 0;
+    for (NSArray *job in jobs) {
+        dispatch_group_enter(group);
+        [[[NSURLSession sharedSession] downloadTaskWithURL:LSRRemoteURL(job[0])
+                                         completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+            if (!location || [(NSHTTPURLResponse *)response statusCode] != 200
+                || ![[NSFileManager defaultManager] moveItemAtURL:location
+                        toURL:[NSURL fileURLWithPath:[staging stringByAppendingPathComponent:job[1]]] error:nil]) {
+                ok = NO;
+            }
+            dispatch_group_leave(group);
+        }] resume];
+    }
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *target = [kLSRPaneWallpapersDir stringByAppendingPathComponent:design.name];
+        if (ok) {
+            [fm removeItemAtPath:target error:nil];
+            ok = [fm moveItemAtPath:staging toPath:target error:nil];
+        }
+        [fm removeItemAtPath:staging error:nil];
+        completion(ok);
+    });
+}
+
+// A remote design's thumbnail: its light still, downloaded once and kept small.
+static void LSRRemoteThumbnail(LSRRemoteDesign *design, void (^completion)(UIImage *image)) {
+    NSString *path = design.stills[@"Light"] ?: design.stills.allValues.firstObject;
+    if (!path) return;
+    NSString *cached = [LSRRemoteCacheDir() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"thumb-%lu.jpg", (unsigned long)path.hash]];
+    UIImage *image = [UIImage imageWithContentsOfFile:cached];
+    if (image) {
+        completion(image);
+        return;
+    }
+    [[[NSURLSession sharedSession] dataTaskWithURL:LSRRemoteURL(path)
+                                 completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        CGImageSourceRef source = data ? CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL) : NULL;
+        UIImage *thumb = nil;
+        if (source) {
+            NSDictionary *options = @{
+                (__bridge NSString *)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+                (__bridge NSString *)kCGImageSourceCreateThumbnailWithTransform: @YES,
+                (__bridge NSString *)kCGImageSourceThumbnailMaxPixelSize: @520,
+            };
+            CGImageRef cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, (__bridge CFDictionaryRef)options);
+            CFRelease(source);
+            if (cgImage) {
+                thumb = [UIImage imageWithCGImage:cgImage];
+                CGImageRelease(cgImage);
+                [UIImageJPEGRepresentation(thumb, 0.8) writeToFile:cached atomically:YES];
+            }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(thumb); });
+    }] resume];
+}
+
+#pragma mark - Settings: grid
+
 @interface LSRWallpaperGridCell : UICollectionViewCell
 @property (nonatomic, strong) LSRSplitThumbnailView *thumbnail;
+@property (nonatomic, strong) UIImageView *remoteImage;
+@property (nonatomic, strong) UIImageView *cloud;
+@property (nonatomic, strong) UIActivityIndicatorView *spinner;
+@property (nonatomic, copy) NSString *remoteName;
 @end
 
 @implementation LSRWallpaperGridCell
@@ -827,6 +1025,73 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
         _thumbnail = [[LSRSplitThumbnailView alloc] initWithFrame:self.contentView.bounds];
         _thumbnail.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         [self.contentView addSubview:_thumbnail];
+        _remoteImage = [[UIImageView alloc] initWithFrame:self.contentView.bounds];
+        _remoteImage.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _remoteImage.contentMode = UIViewContentModeScaleAspectFill;
+        _remoteImage.clipsToBounds = YES;
+        _remoteImage.backgroundColor = [UIColor secondarySystemBackgroundColor];
+        [self.contentView addSubview:_remoteImage];
+        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightSemibold];
+        _cloud = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"icloud.and.arrow.down" withConfiguration:config]];
+        _cloud.tintColor = [UIColor whiteColor];
+        _cloud.layer.shadowOpacity = 0.5;
+        _cloud.layer.shadowRadius = 2;
+        _cloud.layer.shadowOffset = CGSizeZero;
+        [self.contentView addSubview:_cloud];
+        _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+        _spinner.color = [UIColor whiteColor];
+        _spinner.hidesWhenStopped = YES;
+        [self.contentView addSubview:_spinner];
+    }
+    return self;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGSize size = self.contentView.bounds.size;
+    CGSize cloud = self.cloud.intrinsicContentSize;
+    self.cloud.frame = CGRectMake(round((size.width - cloud.width) / 2), size.height - cloud.height - 8, cloud.width, cloud.height);
+    self.spinner.center = CGPointMake(size.width / 2, size.height / 2);
+}
+
+- (void)showLocal:(NSString *)design {
+    self.remoteName = nil;
+    self.thumbnail.hidden = NO;
+    self.remoteImage.hidden = YES;
+    self.cloud.hidden = YES;
+    [self.spinner stopAnimating];
+    self.thumbnail.design = design;
+}
+
+- (void)showRemote:(LSRRemoteDesign *)design downloading:(BOOL)downloading {
+    self.thumbnail.design = nil;
+    self.thumbnail.hidden = YES;
+    self.remoteImage.hidden = NO;
+    self.cloud.hidden = downloading;
+    if (downloading) [self.spinner startAnimating];
+    else [self.spinner stopAnimating];
+    if ([self.remoteName isEqualToString:design.name]) return;
+    self.remoteName = design.name;
+    self.remoteImage.image = nil;
+    NSString *name = design.name;
+    LSRRemoteThumbnail(design, ^(UIImage *image) {
+        if ([self.remoteName isEqualToString:name]) self.remoteImage.image = image;
+    });
+}
+@end
+
+@interface LSRGridHeader : UICollectionReusableView
+@property (nonatomic, strong) UILabel *label;
+@end
+
+@implementation LSRGridHeader
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        _label = [[UILabel alloc] initWithFrame:CGRectInset(self.bounds, 16, 0)];
+        _label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+        _label.textColor = [UIColor labelColor];
+        [self addSubview:_label];
     }
     return self;
 }
@@ -836,9 +1101,12 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
 - (instancetype)initWithKind:(LSRWallpaperKind)kind;
 @end
 
+// Section 0: wallpapers on the iPhone. Section 1: ones that can be downloaded.
 @implementation LSRWallpaperGridController {
     LSRWallpaperKind _kind;
     NSArray<NSString *> *_designs;
+    NSArray<LSRRemoteDesign *> *_remote;
+    NSMutableSet<NSString *> *_downloading;
     UILabel *_emptyLabel;
 }
 
@@ -850,6 +1118,8 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
     if ((self = [super initWithCollectionViewLayout:layout])) {
         _kind = kind;
         _designs = LSRPaneDesignsOfKind(kind);
+        _remote = @[];
+        _downloading = [NSMutableSet new];
         self.title = LSRWallpaperKindTitle(kind);
     }
     return self;
@@ -860,14 +1130,35 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.collectionView.backgroundColor = [UIColor systemBackgroundColor];
     [self.collectionView registerClass:[LSRWallpaperGridCell class] forCellWithReuseIdentifier:@"wallpaper"];
-    if (!_designs.count) {
-        _emptyLabel = [UILabel new];
-        _emptyLabel.text = @"No Wallpapers";
-        _emptyLabel.textColor = [UIColor secondaryLabelColor];
-        _emptyLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2];
-        _emptyLabel.textAlignment = NSTextAlignmentCenter;
-        self.collectionView.backgroundView = _emptyLabel;
+    [self.collectionView registerClass:[LSRGridHeader class] forSupplementaryViewOfKind:UICollectionElementKindSectionHeader
+                   withReuseIdentifier:@"header"];
+    _emptyLabel = [UILabel new];
+    _emptyLabel.text = @"No Wallpapers";
+    _emptyLabel.textColor = [UIColor secondaryLabelColor];
+    _emptyLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2];
+    _emptyLabel.textAlignment = NSTextAlignmentCenter;
+    [self _updateEmptyState];
+    if (_kind == LSRWallpaperKindDynamic) return;
+    LSRLoadRemoteDesigns(^(NSArray<LSRRemoteDesign *> *designs) {
+        [self _setRemote:designs];
+    });
+}
+
+- (void)_setRemote:(NSArray<LSRRemoteDesign *> *)designs {
+    NSSet *local = [NSSet setWithArray:LSRPaneDesigns()];
+    NSMutableArray *remote = [NSMutableArray new];
+    for (LSRRemoteDesign *design in designs) {
+        if ([local containsObject:design.name]) continue;
+        if (_kind == LSRWallpaperKindLive && !design.live) continue;
+        [remote addObject:design];
     }
+    _remote = remote;
+    [self.collectionView reloadData];
+    [self _updateEmptyState];
+}
+
+- (void)_updateEmptyState {
+    self.collectionView.backgroundView = _designs.count || _remote.count ? nil : _emptyLabel;
 }
 
 - (void)viewWillLayoutSubviews {
@@ -880,19 +1171,67 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
     if (!CGSizeEqualToSize(layout.itemSize, item)) layout.itemSize = item;
 }
 
+- (NSInteger)numberOfSectionsInCollectionView:(UICollectionView *)collectionView {
+    return 2;
+}
+
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {
-    return _designs.count;
+    return section == 0 ? _designs.count : _remote.count;
+}
+
+- (CGSize)collectionView:(UICollectionView *)collectionView layout:(UICollectionViewLayout *)layout referenceSizeForHeaderInSection:(NSInteger)section {
+    return section == 1 && _remote.count ? CGSizeMake(collectionView.bounds.size.width, 36) : CGSizeZero;
+}
+
+- (UICollectionReusableView *)collectionView:(UICollectionView *)collectionView viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)indexPath {
+    LSRGridHeader *header = [collectionView dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"header" forIndexPath:indexPath];
+    header.label.text = @"Available to Download";
+    return header;
 }
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
     LSRWallpaperGridCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"wallpaper" forIndexPath:indexPath];
-    cell.thumbnail.design = _designs[indexPath.item];
+    if (indexPath.section == 0) {
+        [cell showLocal:_designs[indexPath.item]];
+    } else {
+        LSRRemoteDesign *design = _remote[indexPath.item];
+        [cell showRemote:design downloading:[_downloading containsObject:design.name]];
+    }
     return cell;
 }
 
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) {
+        [self _preview:_designs[indexPath.item]];
+        return;
+    }
+    LSRRemoteDesign *design = _remote[indexPath.item];
+    if ([_downloading containsObject:design.name]) return;
+    [_downloading addObject:design.name];
+    [collectionView reloadItemsAtIndexPaths:@[indexPath]];
+    LSRDownloadRemoteDesign(design, ^(BOOL ok) {
+        [self->_downloading removeObject:design.name];
+        if (!ok) {
+            [self.collectionView reloadData];
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download Failed"
+                message:@"Check your internet connection and try again." preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
+            return;
+        }
+        // Now it's a local wallpaper: move it up and open it.
+        self->_designs = LSRPaneDesignsOfKind(self->_kind);
+        NSMutableArray *remote = [self->_remote mutableCopy];
+        [remote removeObject:design];
+        self->_remote = remote;
+        [self.collectionView reloadData];
+        [self _preview:design.name];
+    });
+}
+
+- (void)_preview:(NSString *)design {
     LSRWallpaperPreviewController *preview = [[LSRWallpaperPreviewController alloc]
-        initWithDesign:_designs[indexPath.item] live:_kind == LSRWallpaperKindLive];
+        initWithDesign:design live:_kind == LSRWallpaperKindLive];
     [self presentViewController:preview animated:YES completion:nil];
 }
 
@@ -1119,7 +1458,8 @@ static void LSRSaveHomePreview(void) {
 %ctor {
     NSString *process = [NSProcessInfo processInfo].processName;
     NSDictionary *prefs = LSRPanePrefs();
-    if (!LSRPanePrefEnabled(prefs, @"wallpaperPaneEnabled", YES)) return;
+    // Part of "iOS 15 Live Wallpaper": switched off, Settings > Wallpaper is iOS 16's again.
+    if (!LSRPanePrefEnabled(prefs, @"liveWallpaperEnabled", YES)) return;
     if ([process isEqualToString:@"Preferences"]) {
         // Loaded on demand by Settings; load it now so the coordinator class exists to hook.
         dlopen("/System/Library/PrivateFrameworks/Settings/WallpaperSettings.framework/WallpaperSettings", RTLD_NOW);

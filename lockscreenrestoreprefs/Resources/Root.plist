@@ -82,7 +82,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>iOS 15 live wallpapers with automatic Light/Dark switching. Press and hold the lock screen to play. Pick them in Settings &gt; Wallpaper. Wallpapers aren't included: put them in /var/mobile/Library/LockScreenRestore/Wallpapers/&lt;Name&gt;/ as Light.heic, Light.mov, Dark.heic and Dark.mov.</string>
+			<string>iOS 15 live wallpapers with automatic Light/Dark switching, and the iOS 15 page in Settings &gt; Wallpaper to pick them (or a photo) for the lock and home screen. Apple's iOS 14 and 15 wallpapers can be downloaded right there. Press and hold the lock screen to play. Turn this off to get iOS 16's wallpapers and lock screen editor back.</string>
 		</dict>
 		<dict>
 			<key>cell</key>

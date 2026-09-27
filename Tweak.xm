@@ -955,7 +955,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _loadedVariant = variant;
     _loadedDir = dir;
     _imageView.image = LSRWallpaperStillIn(dir, variant);
-    _videoURL = [NSURL fileURLWithPath:[[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]];
+    _videoURL = dir ? [NSURL fileURLWithPath:[[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]] : nil;
     [self stopVideo];
 }
 
@@ -1726,12 +1726,12 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
         sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
         sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);
         sLSRDimInDark = [prefs[@"dimWallpaperInDark"] boolValue];
-        if (sLSRWallpaperDesignDir) {
-            %init(LSRWallpaper);
-            CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
-                LSRWallpaperPrefsChanged, CFSTR("com.aronsz26.lockscreenrestore/wallpaper"), NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately);
-        }
+        // Also without any wallpaper yet: one picked in Settings > Wallpaper (a design or a
+        // photo) then shows right away. Until then our views have no image and stay see-through.
+        %init(LSRWallpaper);
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+            LSRWallpaperPrefsChanged, CFSTR("com.aronsz26.lockscreenrestore/wallpaper"), NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately);
     }
 
 #ifdef DEBUG
