@@ -1,0 +1,22 @@
+# Pushes to main in the private development repo are forwarded to the public repo's main.
+# PUBLIC_REPO_TOKEN: a fine-grained token that may only write to aronsz26/LockScreenRestore.
+name: Publish to public repo
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    # Only in the private repo: the public copy of this file does nothing.
+    if: github.event.repository.private
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Push main to the public repo
+        env:
+          TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: git push "https://x-access-token:${TOKEN}@github.com/aronsz26/LockScreenRestore.git" HEAD:main
