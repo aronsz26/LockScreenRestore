@@ -473,6 +473,20 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
 }
 %end
 
+// iOS 15 started the list (Focus pill, music player, notifications) 29pt below the date's
+// baseline (SBFDashBoardViewMetrics listMinYForPage: = date baseline + dateBaselineToListY);
+// iOS 16 starts it under its own, higher clock. The list view covers the whole screen, so its
+// top inset is the start's height on screen.
+%hook CSCombinedListViewController
+- (UIEdgeInsets)_listViewDefaultContentInsets {
+    UIEdgeInsets insets = %orig;
+    if ([UIDevice currentDevice].userInterfaceIdiom != UIUserInterfaceIdiomPhone) return insets;
+    CGFloat listTop = round(LSRCurrentLayout().dateBaselineY + kIOS15DateBaselineToList);
+    if (insets.top < listTop) insets.top = listTop;
+    return insets;
+}
+%end
+
 #pragma mark - Big padlock that stays open after Face ID
 
 %hook SBUIProudLockIconView
@@ -606,7 +620,6 @@ static void LSRUpdateChargingShift(UIView *view) {
 // reads back), so instead the item stops clipping. iOS leaves 26pt below each adjunct item, far
 // more than the few points the pill sticks out.
 
-static const CGFloat kIOS15FocusPillGap = 10.0;
 
 @interface CSFocusActivityView : UIView
 @end
@@ -616,26 +629,6 @@ static const CGFloat kIOS15FocusPillGap = 10.0;
 %hook CSFocusActivityManager
 - (BOOL)_shouldHideFocusActivityIndicator {
     return NO;
-}
-%end
-
-%hook CSFocusActivityView
-- (CGRect)_activityIndicatorFrame {
-    CGRect frame = %orig;
-    UIView *display = sLSRDisplayView;
-    if (!sLSRClockEnabled || !display || !self.window || display.window != self.window) return frame;
-
-    LSRLayout layout = LSRCurrentLayout();
-    CGFloat wantedTop = layout.dateBaselineY + kSFDescender * layout.dateFontSize + kIOS15FocusPillGap;
-    CGFloat itemTop = [self convertPoint:CGPointZero toView:display].y;
-    // Only ever move it down, never up into the date.
-    frame.origin.y = MAX(frame.origin.y, round((wantedTop - itemTop) * 3.0) / 3.0);
-
-    UIView *item = self.superview;
-    Class itemClass = NSClassFromString(@"CSAdjunctItemView");
-    while (item && ![item isKindOfClass:itemClass]) item = item.superview;
-    if (item.clipsToBounds) item.clipsToBounds = NO;
-    return frame;
 }
 %end
 
@@ -771,17 +764,6 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
     return kIOS15ListInset;
 }
 
-// iOS 15 started the list (Focus pill, music player, notifications) 29pt below the date's
-// baseline (SBFDashBoardViewMetrics listMinYForPage: = date baseline + dateBaselineToListY);
-// iOS 16 starts it under its own, higher clock. The list view covers the whole screen, so its
-// top inset is the start's height on screen.
-- (UIEdgeInsets)_listViewDefaultContentInsets {
-    UIEdgeInsets insets = %orig;
-    if (!sLSRClockEnabled || [UIDevice currentDevice].userInterfaceIdiom != UIUserInterfaceIdiomPhone) return insets;
-    CGFloat listTop = round(LSRCurrentLayout().dateBaselineY + kIOS15DateBaselineToList);
-    if (insets.top < listTop) insets.top = listTop;
-    return insets;
-}
 %end
 
 // Live Activities (like the music player) get a fixed width from the activity metrics, made
