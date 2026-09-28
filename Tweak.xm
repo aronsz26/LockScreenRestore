@@ -1348,6 +1348,10 @@ static const CGFloat kIOS15PlayerHeight = 281.0;
 static const CGFloat kIOS15PlayerInset = 16.0;
 static const CGFloat kIOS15ArtworkSize = 100.0;
 static const CGFloat kIOS15ArtworkCornerRadius = 3.0;
+// The playing app's icon in the artwork's corner (MediaControls 15.6.1, MRUArtworkView
+// layoutSubviews, style 1): 16pt, 8pt in from the bottom right. iOS 16 dropped the icon view.
+static const CGFloat kIOS15AppIconSize = 16.0;
+static const CGFloat kIOS15AppIconInset = 8.0;
 static const CGFloat kIOS15TextLeft = 128.0;
 static const CGFloat kIOS15HeaderTop = 40.0;
 static const CGFloat kIOS15HeaderHeight = 54.0;
@@ -1380,6 +1384,7 @@ static const CGFloat kIOS15SkipGlyphScale = 1.1;
 @end
 
 @interface MRUArtworkView : UIControl
+@property (nonatomic, strong) UIImage *iconImage;
 @property (nonatomic, strong) UIImageView *artworkImageView;
 @property (nonatomic, strong) UIView *artworkShadowView;
 @property (nonatomic, strong) UIView *placeholderBackground;
@@ -1439,6 +1444,7 @@ static const CGFloat kIOS15SkipGlyphScale = 1.1;
 
 @interface MRUMetadataController : NSObject
 @property (readonly, nonatomic) MRUNowPlayingInfo *nowPlayingInfo;
+@property (readonly, copy, nonatomic) NSString *bundleID;
 @end
 
 @interface MRUNowPlayingController : NSObject
@@ -1556,6 +1562,48 @@ static void LSREnforcePlayerVisibility(MRUNowPlayingView *player) {
     if (transport.showRoutingButton) transport.showRoutingButton = NO;
 }
 
+
+@interface MRUAssetsProvider : NSObject
++ (instancetype)sharedAssetsProvider;
+- (UIImage *)applicationIconForBundleIdentifier:(NSString *)bundleID;
+@end
+
+static const void *kLSRAppIconViewKey = &kLSRAppIconViewKey;
+
+// Hands the playing app's icon to the artwork view, which iOS 16 still has a property for.
+static void LSRUpdateAppIcon(MRUNowPlayingViewController *controller) {
+    UIView *view = controller.viewIfLoaded;
+    if (![view isKindOfClass:NSClassFromString(@"MRUNowPlayingView")]) return;
+    MRUArtworkView *artworkView = ((MRUNowPlayingView *)view).artworkView;
+    if (![artworkView respondsToSelector:@selector(setIconImage:)]) return;
+    NSString *bundleID = [controller.controller.metadataController respondsToSelector:@selector(bundleID)]
+        ? controller.controller.metadataController.bundleID : nil;
+    static NSString *lastBundleID;
+    static UIImage *lastIcon;
+    if (bundleID.length && ![bundleID isEqualToString:lastBundleID]) {
+        UIImage *icon = nil;
+        Class provider = NSClassFromString(@"MRUAssetsProvider");
+        @try {
+            if ([provider respondsToSelector:@selector(sharedAssetsProvider)]) {
+                id shared = [provider sharedAssetsProvider];
+                if ([shared respondsToSelector:@selector(applicationIconForBundleIdentifier:)]) {
+                    icon = [shared applicationIconForBundleIdentifier:bundleID];
+                }
+            }
+        } @catch (NSException *e) {
+            icon = nil;
+        }
+        if (![icon isKindOfClass:[UIImage class]]) icon = nil;
+        lastBundleID = [bundleID copy];
+        lastIcon = icon;
+    }
+    UIImage *icon = bundleID.length ? lastIcon : nil;
+    if (artworkView.iconImage != icon) {
+        artworkView.iconImage = icon;
+        [artworkView setNeedsLayout];
+    }
+}
+
 %group LSRMediaPlayer
 
 %hook MRUNowPlayingViewController
@@ -1568,6 +1616,7 @@ static void LSREnforcePlayerVisibility(MRUNowPlayingView *player) {
 - (void)updateNowPlayingInfo {
     %orig;
     if (self.context != kMRUContextCoverSheet) return;
+    LSRUpdateAppIcon(self);
     MRUNowPlayingInfo *info = self.controller.metadataController.nowPlayingInfo;
     if (!info.artist.length || !info.album.length) return;
     UIView *view = self.viewIfLoaded;
@@ -1620,6 +1669,29 @@ static void LSREnforcePlayerVisibility(MRUNowPlayingView *player) {
         if (![view isKindOfClass:[UIView class]]) continue;
         if (fabs(view.layer.cornerRadius - kIOS15ArtworkCornerRadius) > 0.01) view.layer.cornerRadius = kIOS15ArtworkCornerRadius;
     }
+
+    UIImageView *iconView = objc_getAssociatedObject(self, kLSRAppIconViewKey);
+    UIImage *icon = [self respondsToSelector:@selector(iconImage)] ? self.iconImage : nil;
+    if (!iconView && icon) {
+        iconView = [UIImageView new];
+        iconView.contentMode = UIViewContentModeScaleAspectFill;
+        iconView.clipsToBounds = YES;
+        iconView.layer.cornerRadius = round(kIOS15AppIconSize * 0.225 * 3.0) / 3.0;
+        iconView.layer.cornerCurve = kCACornerCurveContinuous;
+        iconView.accessibilityIgnoresInvertColors = YES;
+        objc_setAssociatedObject(self, kLSRAppIconViewKey, iconView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [self addSubview:iconView];
+    }
+    if (!iconView) return;
+    if (iconView.image != icon) iconView.image = icon;
+    UIImageView *artwork = self.artworkImageView;
+    BOOL showsArtwork = artwork && !artwork.hidden && artwork.image;
+    iconView.hidden = !icon || !showsArtwork;
+    CGRect frame = showsArtwork ? artwork.frame : self.bounds;
+    LSRSetFrame(iconView, CGRectMake(CGRectGetMaxX(frame) - kIOS15AppIconSize - kIOS15AppIconInset,
+                                     CGRectGetMaxY(frame) - kIOS15AppIconSize - kIOS15AppIconInset,
+                                     kIOS15AppIconSize, kIOS15AppIconSize));
+    [self bringSubviewToFront:iconView];
 }
 %end
 
