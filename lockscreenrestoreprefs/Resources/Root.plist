@@ -166,6 +166,20 @@
 			<key>action</key>
 			<string>respring</string>
 		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Turns every switch back on and resets Clock Size. Your wallpapers stay.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Reset to Defaults</string>
+			<key>action</key>
+			<string>resetToDefaults</string>
+		</dict>
 	</array>
 </dict>
 </plist>

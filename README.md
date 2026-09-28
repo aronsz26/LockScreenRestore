@@ -124,6 +124,8 @@ Switches take effect after a respring: tap **Apply (Respring)** at the bottom of
 
 **Fix Positions** shows which iPhone and screen size were detected and recalculates all positions with a respring. The tweak also does this by itself every time SpringBoard starts.
 
+**Reset to Defaults** turns every switch back on and resets Clock Size (your wallpapers stay).
+
 Wallpapers are picked in **Settings → Wallpaper**, not here.
 
 <br clear="right">
@@ -195,7 +197,6 @@ For the full iOS 15 look, also set **Settings → Notifications → Display As �
 
 - **Beta:** only tested on one iPhone and one iOS version (see [Compatibility](#compatibility)).
 - Downloadable wallpapers depend on the [SniperGER/iOS-Wallpapers](https://github.com/SniperGER/iOS-Wallpapers) archive being online.
-- The Dock and folder backgrounds on the home screen may still be a blurred version of your iOS 16 wallpaper.
 - The home screen preview in Settings → Wallpaper is a small screenshot of your home screen, taken when you unlock to it. After changing the home screen wallpaper it shows the wallpaper without icons until you unlock again. The screenshot stays on your iPhone (`/var/mobile/Library/LockScreenRestore/HomePreview.jpg`).
 - With **iOS 15 Live Wallpaper** on, the long press no longer opens iOS 16's lock screen editor.
 - Notification text follows **Settings → Display & Brightness → Text Size**. Apple's iOS 15 screenshots use the default size.

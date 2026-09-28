@@ -100,6 +100,34 @@ static void LSRWritePrefsFile(NSString *changedKey, id changedValue) {
     LSRWritePrefsFile([specifier propertyForKey:@"key"], value);
 }
 
+// Every switch and the Clock Size slider back to its default (the wallpapers picked in
+// Settings > Wallpaper stay), then a respring so SpringBoard picks it up.
+- (void)resetToDefaults {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset to Defaults"
+        message:@"All switches and Clock Size go back to their defaults. Your wallpapers stay as they are. Your iPhone will respring."
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        CFStringRef domain = (__bridge CFStringRef)kLSRDomain;
+        NSMutableArray<NSString *> *keys = [NSMutableArray new];
+        for (PSSpecifier *specifier in [self specifiers]) {
+            NSString *key = [specifier propertyForKey:@"key"];
+            if (key.length) [keys addObject:key];
+        }
+        for (NSString *key in keys) CFPreferencesSetAppValue((__bridge CFStringRef)key, NULL, domain);
+        CFPreferencesAppSynchronize(domain);
+        NSString *path = LSRPrefsFilePath();
+        NSMutableDictionary *prefs = [NSMutableDictionary dictionaryWithContentsOfFile:path];
+        if (prefs) {
+            [prefs removeObjectsForKeys:keys];
+            [prefs writeToFile:path atomically:YES];
+        }
+        [self reloadSpecifiers];
+        [self respring];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)respring {
     LSRWritePrefsFile(nil, nil);
     SBSRelaunchAction *action = [SBSRelaunchAction actionWithReason:@"RestartRenderServer"
