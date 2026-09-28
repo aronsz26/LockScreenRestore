@@ -172,7 +172,8 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 | iPhone 13 Pro | 390 × 844 pt | ✅ Tested (iOS 16.1.1) |
 | iPhone 12 Pro | 390 × 844 pt | ✅ Tested (iOS 16.5) |
 | iPhone 12, 13, 14 | 390 × 844 pt | Should work (same screen as tested) |
-| iPhone X, XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Reported on iPhone X (16.7): clock position fixed in 1.9, notification overlap being looked at |
+| iPhone X | 375 × 812 pt | ✅ Tested by a user (iOS 16.7) |
+| iPhone XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Should work (same screen as the iPhone X) |
 | iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Reported on iPhone XR: clock position fixed in 1.9 |
 | iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
 | iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Supported, untested (padlock least certain) |
