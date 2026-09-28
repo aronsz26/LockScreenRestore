@@ -839,6 +839,19 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 }
 %end
 
+// iOS 15 only had the list. iOS 16's Settings > Notifications > Display As also offers Count
+// and Stack (0 = List there): always use the list while this is on. The user's choice stays
+// saved and applies again without the tweak.
+%hook NCNotificationMasterList
+- (void)setCurrentListDisplayStyleSetting:(NSUInteger)setting {
+    %orig(0);
+}
+
+- (NSUInteger)currentListDisplayStyleSetting {
+    return 0;
+}
+%end
+
 %end // LSRNotifications
 
 #pragma mark - Group: iOS 15 live wallpaper

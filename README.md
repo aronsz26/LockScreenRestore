@@ -38,7 +38,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 | Clock | Big bold clock, date above it, tinted | Thin iOS 15 clock, "Sunday, September 27" below it, plain white |
 | Padlock | Small, fades away after Face ID | Big, stays open after Face ID |
 | Focus | Name at the bottom of the screen | Pill under the date |
-| Notifications | Collected at the bottom | Listed right under the clock, iOS 15 cards |
+| Notifications | Collected at the bottom, as a count, stack or list | Listed right under the clock, iOS 15 cards, always as a list |
 | Music player | Compact Live Activity | iOS 15 player with volume slider |
 | Charging | Battery drawn under the padlock | Battery where the clock is |
 | Unlock | Same blur on every unlock, home wallpaper static | iOS 15 transition: home wallpaper follows the swipe |
@@ -189,8 +189,6 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 2. Open it with Sileo, Zebra or Filza and install it.
 3. The package needs **PreferenceLoader**; your package manager installs it automatically if it's missing.
 
-For the full iOS 15 look, also set **Settings → Notifications → Display As → List**.
-
 **If something goes wrong:** the tweak runs in SpringBoard, the lock screen music player and Settings. If your iPhone lands in Safe Mode, turn the part that caused it off in the tweak's settings or uninstall the package, and please [open an issue](../../issues) with what you did right before.
 
 ## Known limitations
@@ -200,7 +198,6 @@ For the full iOS 15 look, also set **Settings → Notifications → Display As �
 - The home screen preview in Settings → Wallpaper is a small screenshot of your home screen, taken when you unlock to it. After changing the home screen wallpaper it shows the wallpaper without icons until you unlock again. The screenshot stays on your iPhone (`/var/mobile/Library/LockScreenRestore/HomePreview.jpg`).
 - With **iOS 15 Live Wallpaper** on, the long press no longer opens iOS 16's lock screen editor.
 - Notification text follows **Settings → Display & Brightness → Text Size**. Apple's iOS 15 screenshots use the default size.
-- Stacked vs. list view still follows **Settings → Notifications → Display As**.
 - Some apps send their own text for the music player (Spotify Connect shows "Listening on …"); that text is shown as the app sends it.
 - Other tweaks that change the lock screen clock, padlock, notification list, music player or wallpaper may conflict.
 
