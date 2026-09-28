@@ -7,3 +7,5 @@ Maintainer: aronsz26
 Author: aronsz26
 Section: Tweaks
 Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 16.0), preferenceloader
+SileoDepiction: https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main/depiction/sileo.json
+Icon: https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main/depiction/icon.png

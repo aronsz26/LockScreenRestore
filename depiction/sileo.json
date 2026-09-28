@@ -1,0 +1,112 @@
+{
+  "minVersion": "0.1",
+  "class": "DepictionTabView",
+  "headerImage": "https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main/depiction/banner.jpg",
+  "tintColor": "#8E44C8",
+  "tabs": [
+    {
+      "tabname": "Details",
+      "class": "DepictionStackView",
+      "views": [
+        {
+          "class": "DepictionScreenshotsView",
+          "itemCornerRadius": 14,
+          "itemSize": "{160, 346}",
+          "screenshots": [
+            {
+              "url": "https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main/screenshots/lockscreen.jpg",
+              "accessibilityText": "Lock screen"
+            },
+            {
+              "url": "https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main/screenshots/notifications.jpg",
+              "accessibilityText": "Notifications"
+            },
+            {
+              "url": "https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main/screenshots/music.jpg",
+              "accessibilityText": "Music player"
+            },
+            {
+              "url": "https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main/screenshots/settings.jpg",
+              "accessibilityText": "Settings"
+            }
+          ]
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "useSpacing": true,
+          "markdown": "**The iOS 15 lock screen, back on iOS 16.** Thin clock with the date below it, the big padlock, notifications right under the clock, the iOS 15 music player, live and dynamic wallpapers and the old Settings → Wallpaper page.\n\nEvery part has its own switch, so you can mix iOS 15 and iOS 16 however you like."
+        },
+        {
+          "class": "DepictionHeaderView",
+          "title": "What it changes"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "useSpacing": true,
+          "markdown": "🕘 **Clock** – thin iOS 15 clock and date, big padlock that stays open after Face ID, no depth effect\n\n🔔 **Notifications** – listed right under the clock with iOS 15 cards and the Notification Centre header\n\n🎵 **Music player** – large artwork with the app's icon, AirPlay button, volume slider\n\n🌙 **Focus** – the Focus pill under the date\n\n🔓 **Unlock animation** – the iOS 15 transition to the home screen\n\n🖼️ **Wallpapers** – Live and Dynamic wallpapers are back, Perspective Zoom, and the iOS 15 Settings → Wallpaper page with Apple's iOS 14/15 wallpapers to download\n\n🔋 **Charging** – the battery appears where the clock is"
+        },
+        {
+          "class": "DepictionHeaderView",
+          "title": "Good to know"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "useSpacing": true,
+          "markdown": "Sizes and positions are calculated for every iPhone from iOS 15's own values. This is a **beta**: feedback and screenshots from other iPhones are very welcome on GitHub. iPads aren't supported."
+        },
+        {
+          "class": "DepictionSeparatorView"
+        },
+        {
+          "class": "DepictionTableTextView",
+          "title": "Compatibility",
+          "text": "iOS 16 · rootless"
+        },
+        {
+          "class": "DepictionTableTextView",
+          "title": "Developer",
+          "text": "aronsz26"
+        },
+        {
+          "class": "DepictionTableButtonView",
+          "title": "Source code & issues",
+          "action": "https://github.com/aronsz26/LockScreenRestore",
+          "openExternal": true
+        },
+        {
+          "class": "DepictionTableButtonView",
+          "title": "Report a problem",
+          "action": "https://github.com/aronsz26/LockScreenRestore/issues",
+          "openExternal": true
+        }
+      ]
+    },
+    {
+      "tabname": "Changelog",
+      "class": "DepictionStackView",
+      "views": [
+        {
+          "class": "DepictionMarkdownView",
+          "useSpacing": true,
+          "markdown": "**1.9.2**\n- The list below the clock starts where it did on iOS 15\n- Notifications are always shown as a list\n- The music player shows the playing app's icon on the artwork\n- Focus pill no longer jumps down after scrolling\n- Reset to Defaults in the settings\n- Settings → Wallpaper: iOS 15 spacing for Dynamic · Stills · Live"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "useSpacing": true,
+          "markdown": "**1.9.1**\n- iOS 15 clock size and position on every iPhone"
+        },
+        {
+          "class": "DepictionMarkdownView",
+          "useSpacing": true,
+          "markdown": "**1.9**\n- Dynamic wallpapers, Perspective Zoom and the iOS 15 unlock animation"
+        },
+        {
+          "class": "DepictionTableButtonView",
+          "title": "All releases",
+          "action": "https://github.com/aronsz26/LockScreenRestore/releases",
+          "openExternal": true
+        }
+      ]
+    }
+  ]
+}
