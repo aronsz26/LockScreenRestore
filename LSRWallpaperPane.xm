@@ -14,6 +14,7 @@
 #import <objc/message.h>
 #import <dlfcn.h>
 #import <ImageIO/ImageIO.h>
+#import "LSRBokeh.h"
 #import <AVFoundation/AVFoundation.h>
 
 static NSString *const kLSRPaneDomain = @"com.aronsz26.lockscreenrestore";
@@ -60,6 +61,7 @@ static void LSRPaneNotifySpringBoard(void) {
 static NSString *LSRPaneDesignDir(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *chosen = LSRPanePrefs()[@"wallpaperDesign"];
+    if (LSRIsBokehDesign(chosen)) return chosen;
     if ([chosen isKindOfClass:[NSString class]] && chosen.length) {
         NSString *dir = [kLSRPaneWallpapersDir stringByAppendingPathComponent:chosen];
         if ([fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"Light.heic"]]) return dir;
@@ -147,7 +149,11 @@ static NSString *LSRPaneDesignDir(void) {
     NSString *dir = LSRPaneDesignDir();
     BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
     NSString *path = [dir stringByAppendingPathComponent:dark ? @"Dark.heic" : @"Light.heic"];
-    self.imageView.image = dir ? [UIImage imageWithContentsOfFile:path] : nil;
+    if (LSRIsBokehDesign(dir)) {
+        self.imageView.image = LSRBokehImage(dir, dark, [UIScreen mainScreen].bounds.size);
+    } else {
+        self.imageView.image = dir ? [UIImage imageWithContentsOfFile:path] : nil;
+    }
     [self setNeedsLayout];
 }
 
@@ -215,7 +221,9 @@ static NSString *LSRPaneDesignDir(void) {
     if (!home) {
         NSString *design = LSRPanePrefs()[@"homeWallpaperDesign"];
         BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
-        if ([design isKindOfClass:[NSString class]] && design.length) {
+        if (LSRIsBokehDesign(design)) {
+            home = LSRBokehImage(design, dark, [UIScreen mainScreen].bounds.size);
+        } else if ([design isKindOfClass:[NSString class]] && design.length) {
             home = [UIImage imageWithContentsOfFile:[[kLSRPaneWallpapersDir stringByAppendingPathComponent:design]
                 stringByAppendingPathComponent:dark ? @"Dark.heic" : @"Light.heic"]];
         }
@@ -366,7 +374,7 @@ static NSArray<NSString *> *LSRPaneDesigns(void) {
 // Stills: every design. Live: the ones that come with a video. Dynamic (iOS 15's moving bokeh
 // wallpapers) has nothing yet.
 static NSArray<NSString *> *LSRPaneDesignsOfKind(LSRWallpaperKind kind) {
-    if (kind == LSRWallpaperKindDynamic) return @[];
+    if (kind == LSRWallpaperKindDynamic) return LSRBokehDesigns();
     NSArray *designs = LSRPaneDesigns();
     if (kind == LSRWallpaperKindStills) return designs;
     NSMutableArray *live = [NSMutableArray new];
@@ -440,6 +448,13 @@ static UIImage *LSRPaneThumbnail(NSString *design, NSString *variant, CGFloat ma
     self.lightView.image = nil;
     self.darkView.image = nil;
     if (!design) return;
+    if (LSRIsBokehDesign(design)) {
+        // Rendered from UIKit views: main thread only, and quick enough at this size.
+        CGSize size = CGSizeMake(130, round(130 * [UIScreen mainScreen].bounds.size.height / [UIScreen mainScreen].bounds.size.width));
+        self.lightView.image = LSRBokehImage(design, NO, size);
+        self.darkView.image = LSRBokehImage(design, YES, size) ?: self.lightView.image;
+        return;
+    }
     CGFloat pixels = 520;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         UIImage *light = LSRPaneThumbnail(design, @"Light", pixels);
@@ -555,7 +570,10 @@ static const CGFloat kLSRCollectionsGap = 11.0;
         UIImage *still = stillDesign ? LSRPaneThumbnail(stillDesign, @"Dark", 520) : nil;
         UIImage *livePicture = liveDesign ? LSRPaneThumbnail(liveDesign, @"Light", 520) : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self->_tiles[LSRWallpaperKindDynamic] setImage:LSRDynamicPlaceholder(CGSizeMake(120, 260)) forState:UIControlStateNormal];
+            NSString *bokeh = LSRBokehDesigns().firstObject;
+            UIImage *dynamic = bokeh ? LSRBokehImage(bokeh, YES, CGSizeMake(130, 282)) : nil;
+            [self->_tiles[LSRWallpaperKindDynamic] setImage:dynamic ?: LSRDynamicPlaceholder(CGSizeMake(120, 260))
+                                                   forState:UIControlStateNormal];
             [self->_tiles[LSRWallpaperKindStills] setImage:still forState:UIControlStateNormal];
             [self->_tiles[LSRWallpaperKindLive] setImage:livePicture forState:UIControlStateNormal];
         });
@@ -656,6 +674,9 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
     UIButton *_cancel;
     UIButton *_set;
     UILabel *_hint;
+    UIView *_bokehView;
+    UIButton *_perspective;
+    BOOL _perspectiveOn;
 }
 
 - (instancetype)initWithDesign:(NSString *)design live:(BOOL)live {
@@ -730,6 +751,17 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
 
     _cancel = [self _barButton:@"Cancel" action:@selector(_cancelTapped)];
     _set = [self _barButton:@"Set" action:@selector(_setTapped)];
+    // iOS 15's toggle between the buttons (Dynamic wallpapers move on their own).
+    id saved = LSRPanePrefs()[@"perspectiveZoom"];
+    _perspectiveOn = saved ? [saved boolValue] : YES;
+    if (!LSRIsBokehDesign(_design)) {
+        _perspective = [UIButton buttonWithType:UIButtonTypeSystem];
+        _perspective.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        [_perspective setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [_perspective addTarget:self action:@selector(_perspectiveTapped) forControlEvents:UIControlEventTouchUpInside];
+        [self.view addSubview:_perspective];
+        [self _updatePerspectiveTitle];
+    }
     if (_live) {
         _hint = [UILabel new];
         _hint.text = @"Touch and hold to play";
@@ -744,8 +776,27 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
     [self _reloadContent];
 }
 
+- (void)_updatePerspectiveTitle {
+    [_perspective setTitle:_perspectiveOn ? @"Perspective Zoom: On" : @"Perspective Zoom: Off" forState:UIControlStateNormal];
+}
+
+- (void)_perspectiveTapped {
+    _perspectiveOn = !_perspectiveOn;
+    [self _updatePerspectiveTitle];
+}
+
 - (void)_reloadContent {
-    _imageView.image = _photo ?: [UIImage imageWithContentsOfFile:[self _pathFor:@"heic"]];
+    if (LSRIsBokehDesign(_design)) {
+        BOOL dark = [[self _variant] isEqualToString:@"Dark"];
+        [_bokehView removeFromSuperview];
+        _bokehView = LSRBokehView(_design, dark, self.view.bounds);
+        _bokehView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        if (_bokehView) [self.view insertSubview:_bokehView aboveSubview:_imageView];
+        LSRSetBokehAnimating(_bokehView, YES);
+        _imageView.image = _bokehView ? nil : LSRBokehImage(_design, dark, self.view.bounds.size);
+    } else {
+        _imageView.image = _photo ?: [UIImage imageWithContentsOfFile:[self _pathFor:@"heic"]];
+    }
     NSDateFormatter *time = [NSDateFormatter new];
     time.locale = [NSLocale autoupdatingCurrentLocale];
     time.dateFormat = [NSDateFormatter dateFormatFromTemplate:@"jmm" options:0 locale:time.locale];
@@ -774,6 +825,9 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
     _cancel.frame = CGRectMake(24, y, buttonW, buttonH);
     _set.frame = CGRectMake(w - 24 - buttonW, y, buttonW, buttonH);
     _hint.frame = CGRectMake(0, y - 34, w, 20);
+    // Above the buttons, like iOS 15 (the Live hint moves up to make room).
+    _perspective.frame = CGRectMake(0, y - 40, w, 28);
+    if (_perspective) _hint.frame = CGRectMake(0, y - 66, w, 20);
 }
 
 - (void)_pressed:(UILongPressGestureRecognizer *)press {
@@ -809,6 +863,7 @@ static void LSRApplyWallpaper(NSString *design, UIImage *photo, NSURL *video, LS
 }
 
 - (void)_applyToLocations:(LSRWallpaperLocations)locations {
+    if (_perspective) LSRPaneSetPref(@"perspectiveZoom", @(_perspectiveOn));
     LSRApplyWallpaper(_photo ? nil : _design, _photo, _photoVideo, locations);
     [self dismissViewControllerAnimated:YES completion:nil];
 }

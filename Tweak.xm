@@ -16,6 +16,7 @@
 #import <objc/message.h>
 #import <CoreText/CoreText.h>
 #import <AVFoundation/AVFoundation.h>
+#import "LSRBokeh.h"
 
 // Read straight from disk: NSUserDefaults in SpringBoard's constructor didn't see the values
 // (cfprefsd). The settings page flushes to disk before its respring. Rootless jailbreaks
@@ -822,6 +823,10 @@ static NSString *sLSRHomeDesignDir = nil;
 // up, the home screen's once it goes away. (While it slides, the cover sheet carries its own
 // copy of the lock screen wallpaper, see LSRCoverWithStill.)
 static BOOL sLSRShowingLockScreen = YES;
+// iOS 15's "Perspective Zoom": the wallpaper is drawn a bit larger and shifts as the iPhone
+// tilts. Dynamic wallpapers move on their own and skip it.
+static BOOL sLSRPerspectiveZoom = YES;
+static const CGFloat kLSRPerspectiveMargin = 28.0;
 // "Dark Appearance Dims Wallpaper" (Settings > Wallpaper).
 static BOOL sLSRDimInDark = NO;
 // Posted in SpringBoard after Settings picked another design or toggled dimming.
@@ -839,6 +844,8 @@ static NSString *LSRWallpaperVariant(UITraitCollection *traits) {
 // the copies iOS slides around during lock/unlock).
 static UIImage *LSRWallpaperStillIn(NSString *dir, NSString *variant) {
     if (!dir) return nil;
+    // Dynamic: a still of the bokeh (the lock screen's sliding copies can't animate).
+    if (LSRIsBokehDesign(dir)) return LSRBokehImage(dir, [variant isEqualToString:@"Dark"], [UIScreen mainScreen].bounds.size);
     if (!sLSRStillCache) sLSRStillCache = [NSMutableDictionary new];
     NSString *path = [[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"heic"];
     UIImage *image = sLSRStillCache[path];
@@ -865,7 +872,9 @@ static NSString *LSRWindowDesignDir(void) {
 @end
 
 @implementation LSRLiveWallpaperView {
+    UIView *_contentView;   // image, video and bokeh; moves with the device for Perspective Zoom
     UIImageView *_imageView;
+    UIView *_bokehView;
     UIView *_dimView;
     AVPlayer *_player;
     AVPlayerLayer *_playerLayer;
@@ -881,10 +890,13 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     if ((self = [super initWithFrame:frame])) {
         self.userInteractionEnabled = NO;
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        _imageView = [[UIImageView alloc] initWithFrame:self.bounds];
+        self.clipsToBounds = YES;
+        _contentView = [[UIView alloc] initWithFrame:self.bounds];
+        [self addSubview:_contentView];
+        _imageView = [[UIImageView alloc] initWithFrame:_contentView.bounds];
         _imageView.contentMode = UIViewContentModeScaleAspectFill;
         _imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        [self addSubview:_imageView];
+        [_contentView addSubview:_imageView];
 
         _player = [AVPlayer new];
         _player.muted = YES;
@@ -892,7 +904,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
         _playerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
         _playerLayer.opacity = 0.0;
-        [self.layer addSublayer:_playerLayer];
+        [_contentView.layer addSublayer:_playerLayer];
 
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_videoDidEnd:)
                                                      name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
@@ -930,10 +942,34 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
 
 - (void)layoutSubviews {
     [super layoutSubviews];
+    BOOL perspective = sLSRPerspectiveZoom && !_bokehView;
+    CGFloat margin = perspective ? kLSRPerspectiveMargin : 0.0;
+    // Set center/bounds, not frame: the motion effects offset the center.
+    _contentView.bounds = CGRectMake(0, 0, self.bounds.size.width + 2 * margin, self.bounds.size.height + 2 * margin);
+    _contentView.center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _playerLayer.frame = self.bounds;
+    _playerLayer.frame = _contentView.bounds;
     [CATransaction commit];
+    _bokehView.frame = _contentView.bounds;
+    [self _updatePerspective:perspective];
+}
+
+- (void)_updatePerspective:(BOOL)on {
+    if (on == (_contentView.motionEffects.count > 0)) return;
+    for (UIMotionEffect *effect in [_contentView.motionEffects copy]) [_contentView removeMotionEffect:effect];
+    if (!on) return;
+    UIInterpolatingMotionEffect *x = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.x"
+        type:UIInterpolatingMotionEffectTypeTiltAlongHorizontalAxis];
+    x.minimumRelativeValue = @(-kLSRPerspectiveMargin);
+    x.maximumRelativeValue = @(kLSRPerspectiveMargin);
+    UIInterpolatingMotionEffect *y = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.y"
+        type:UIInterpolatingMotionEffectTypeTiltAlongVerticalAxis];
+    y.minimumRelativeValue = @(-kLSRPerspectiveMargin);
+    y.maximumRelativeValue = @(kLSRPerspectiveMargin);
+    UIMotionEffectGroup *group = [UIMotionEffectGroup new];
+    group.motionEffects = @[x, y];
+    [_contentView addMotionEffect:group];
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
@@ -957,6 +993,20 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     if ([variant isEqualToString:_loadedVariant] && [dir isEqualToString:_loadedDir]) return;
     _loadedVariant = variant;
     _loadedDir = dir;
+    [_bokehView removeFromSuperview];
+    _bokehView = nil;
+    if (LSRIsBokehDesign(dir)) {
+        // Dynamic: Apple's animated bokeh, no video.
+        _bokehView = LSRBokehView(dir, [variant isEqualToString:@"Dark"], _contentView.bounds);
+        if (_bokehView) [_contentView insertSubview:_bokehView aboveSubview:_imageView];
+        LSRSetBokehAnimating(_bokehView, YES);
+        _imageView.image = _bokehView ? nil : LSRWallpaperStillIn(dir, variant);
+        _videoURL = nil;
+        [self setNeedsLayout];
+        [self stopVideo];
+        return;
+    }
+    [self setNeedsLayout];
     _imageView.image = LSRWallpaperStillIn(dir, variant);
     _videoURL = dir ? [NSURL fileURLWithPath:[[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]] : nil;
     [self stopVideo];
@@ -1195,6 +1245,7 @@ static void LSRCoverWithStill(UIView *effectView) {
 // The home screen's design folder, nil when none was picked (then it shows the lock screen's).
 static NSString *LSRResolveHomeDesignDir(NSDictionary *prefs) {
     NSString *chosen = prefs[@"homeWallpaperDesign"];
+    if (LSRIsBokehDesign(chosen)) return chosen;
     if (![chosen isKindOfClass:[NSString class]] || !chosen.length) return nil;
     NSString *dir = [kLSRWallpapersDir stringByAppendingPathComponent:chosen];
     return [[NSFileManager defaultManager] fileExistsAtPath:[dir stringByAppendingPathComponent:@"Light.heic"]] ? dir : nil;
@@ -1204,6 +1255,7 @@ static NSString *LSRResolveHomeDesignDir(NSDictionary *prefs) {
 static NSString *LSRResolveWallpaperDesignDir(NSDictionary *prefs) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *chosen = prefs[@"wallpaperDesign"];
+    if (LSRIsBokehDesign(chosen)) return chosen;  // a Dynamic wallpaper
     if ([chosen isKindOfClass:[NSString class]] && chosen.length) {
         NSString *dir = [kLSRWallpapersDir stringByAppendingPathComponent:chosen];
         if ([fm fileExistsAtPath:[dir stringByAppendingPathComponent:@"Light.heic"]]) return dir;
@@ -1235,6 +1287,7 @@ static void LSRWallpaperPrefsChanged(CFNotificationCenterRef center, void *obser
         if (dir) sLSRWallpaperDesignDir = dir;
         sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);
         sLSRDimInDark = [prefs[@"dimWallpaperInDark"] boolValue];
+        sLSRPerspectiveZoom = prefs[@"perspectiveZoom"] ? [prefs[@"perspectiveZoom"] boolValue] : YES;
         [sLSRStillCache removeAllObjects];
         [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
     });
@@ -1740,6 +1793,7 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
         sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
         sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);
         sLSRDimInDark = [prefs[@"dimWallpaperInDark"] boolValue];
+        sLSRPerspectiveZoom = prefs[@"perspectiveZoom"] ? [prefs[@"perspectiveZoom"] boolValue] : YES;
         // Also without any wallpaper yet: one picked in Settings > Wallpaper (a design or a
         // photo) then shows right away. Until then our views have no image and stay see-through.
         %init(LSRWallpaper);
