@@ -185,9 +185,17 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 
 ## Installation
 
-1. Download the `.deb` from the [latest release](../../releases/latest).
-2. Open it with Sileo, Zebra or Filza and install it.
-3. The package needs **PreferenceLoader**; your package manager installs it automatically if it's missing.
+**Recommended:** add the repo to Sileo or Zebra and install LockScreenRestore from there. You'll get updates automatically.
+
+```
+https://aronsz26.github.io/
+```
+
+Or open [aronsz26.github.io](https://aronsz26.github.io/) on your iPhone and tap **Add to Sileo** / **Add to Zebra**.
+
+**Manually:** download the `.deb` from the [latest release](../../releases/latest) and open it with Sileo, Zebra or Filza.
+
+The package needs **PreferenceLoader**; your package manager installs it automatically if it's missing.
 
 **If something goes wrong:** the tweak runs in SpringBoard, the lock screen music player and Settings. If your iPhone lands in Safe Mode, turn the part that caused it off in the tweak's settings or uninstall the package, and please [open an issue](../../issues) with what you did right before.
 
