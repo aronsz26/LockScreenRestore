@@ -1,4 +1,4 @@
-# Writes the Sileo native depiction. Run: python3 depiction/tools/make_depiction.py https://raw.githubusercontent.com/aronsz26/LockScreenRestore/main depiction/sileo.json
+# Writes the Sileo native depiction into the repo (aronsz26.github.io). Run: python3 depiction/tools/make_depiction.py https://aronsz26.github.io/depictions/lockscreenrestore ~/aronsz26.github.io/depictions/lockscreenrestore/depiction/sileo.json (and copy screenshots/ + depiction/banner.jpg, icon.png there)
 import json, os, sys
 base = sys.argv[1].rstrip('/')
 out = sys.argv[2]
