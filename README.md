@@ -3,7 +3,7 @@
 Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player, live wallpapers and the old **Settings → Wallpaper** page.
 
 > [!IMPORTANT]
-> **This is a beta.** It has only been tested on an **iPhone 13 Pro, iOS 16.1.1, Dopamine**. Positions are calculated for every screen, but nobody has checked them on other iPhones yet.
+> **This is a beta.** So far it's been tested on an **iPhone 13 Pro (iOS 16.1.1)** and an **iPhone 12 Pro (iOS 16.5)**, both with Dopamine. Positions are calculated for every screen, but other screen sizes haven't been checked yet.
 >
 > **Feedback is very welcome:** if you try it on a different iPhone or iOS 16 version, please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot, even if everything looks right. That's how the [compatibility table](#compatibility) gets filled in.
 
@@ -81,6 +81,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 - Bigger play/pause, previous and next buttons
 - **Volume slider** (iOS 16 removed it from the lock screen)
 - "Artist — Album" under the title instead of only the artist
+- Tapping the artwork no longer switches the lock screen to iOS 16's full-screen album art
 
 <br clear="right">
 
@@ -157,12 +158,13 @@ If you'd rather keep iOS 16's wallpapers, turn **iOS 15 Live Wallpaper** off: th
 
 ## Compatibility
 
-Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 16.1.1; other iOS 16 versions and jailbreaks are untested.
+Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 16.1.1 and 16.5; other iOS 16 versions and jailbreaks are untested.
 
 | iPhone | Screen | Status |
 |---|---|---|
-| iPhone 13 Pro | 390 × 844 pt | ✅ Tested |
-| iPhone 12, 12 Pro, 13, 14 | 390 × 844 pt | Should work (same screen as tested) |
+| iPhone 13 Pro | 390 × 844 pt | ✅ Tested (iOS 16.1.1) |
+| iPhone 12 Pro | 390 × 844 pt | ✅ Tested (iOS 16.5) |
+| iPhone 12, 13, 14 | 390 × 844 pt | Should work (same screen as tested) |
 | iPhone X, XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Supported, untested |
 | iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Supported, untested |
 | iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |

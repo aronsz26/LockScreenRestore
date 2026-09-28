@@ -1357,6 +1357,7 @@ static const CGFloat kIOS15SkipGlyphScale = 1.1;
 @interface MRUNowPlayingViewController : UIViewController
 @property (nonatomic) NSInteger context;
 @property (nonatomic, strong) MRUNowPlayingController *controller;
+@property (nonatomic) BOOL showArtworkView;
 @end
 
 static BOOL LSRIsLockScreenPlayer(MRUNowPlayingView *view) {
@@ -1483,6 +1484,14 @@ static void LSREnforcePlayerVisibility(MRUNowPlayingView *player) {
     MRUNowPlayingLabelView *labelView = ((MRUNowPlayingView *)view).headerView.labelView;
     if (![labelView.subtitle isEqualToString:info.artist]) return;
     labelView.subtitle = [NSString stringWithFormat:@"%@ \u2014 %@", info.artist, info.album];
+}
+
+// Tapping the artwork turns on iOS 16's full-screen album art (the lock screen shows the cover,
+// the player hides its own). iOS 15 had no such thing and our layout keeps a gap where the
+// artwork was. Don't turn it on; still let a tap turn it off for anyone already in it.
+- (void)didSelectArtworkView:(id)artworkView {
+    if (self.context == kMRUContextCoverSheet && self.showArtworkView) return;
+    %orig;
 }
 %end
 
