@@ -1460,7 +1460,7 @@ static UIImage *LSRFramedPreviewImage(SBSUIWallpaperPreviewViewController *contr
 %end // LSRPanePreview
 
 // Settings saves where you are when it goes to the background, asking every controller on the
-// stack for Settings-specific details ours don't have; don't let that take the app down.
+// stack for Settings-specific details; don't let anything we missed take the app down.
 %group LSRPaneURLGuard
 
 %hook PSURLManager
@@ -1536,6 +1536,47 @@ static void LSRSaveHomePreview(void) {
 
 %end // LSRHomePreview
 
+// Settings asks every page on its stack for its PSSpecifier to remember where you were (and
+// goes back to its main page when the answer is missing). Our Wallpaper page answers with
+// Settings' own "Wallpaper" row, like iOS's page does; the pages under it have none.
+static id LSRPaneSpecifier(UIViewController *controller, SEL _cmd) {
+    if (![controller isKindOfClass:NSClassFromString(@"LSRWallpaperSettingsController")]) return nil;
+    for (UINavigationController *nav = controller.navigationController; nav; nav = nav.navigationController) {
+        for (UIViewController *candidate in nav.viewControllers) {
+            if (candidate != controller && [candidate respondsToSelector:@selector(specifierForID:)]) {
+                id specifier = ((id (*)(id, SEL, id))objc_msgSend)(candidate, @selector(specifierForID:), @"Wallpaper");
+                if (specifier) return specifier;
+            }
+        }
+    }
+    return nil;
+}
+
+static CGFloat LSRPaneVerticalContentOffset(UIViewController *controller, SEL _cmd) {
+    return 0;
+}
+
+// When Settings goes to the background it closes every page that doesn't say it can be shown
+// again on return (-[PreferencesAppController clearControllersForSuspendedState]); ours can.
+static BOOL LSRPaneCanBeShownFromSuspendedState(UIViewController *controller, SEL _cmd) {
+    return YES;
+}
+
+static void LSRAddSettingsPageMethods(Class cls) {
+    if (!cls) return;
+    SEL suspended = NSSelectorFromString(@"canBeShownFromSuspendedState");
+    if (![cls instancesRespondToSelector:suspended]) {
+        class_addMethod(cls, suspended, (IMP)LSRPaneCanBeShownFromSuspendedState, "B@:");
+    }
+    if (![cls instancesRespondToSelector:@selector(specifier)]) {
+        class_addMethod(cls, @selector(specifier), (IMP)LSRPaneSpecifier, "@@:");
+    }
+    SEL offset = NSSelectorFromString(@"verticalContentOffset");
+    if (![cls instancesRespondToSelector:offset]) {
+        class_addMethod(cls, offset, (IMP)LSRPaneVerticalContentOffset, "d@:");
+    }
+}
+
 %ctor {
     NSString *process = [NSProcessInfo processInfo].processName;
     NSDictionary *prefs = LSRPanePrefs();
@@ -1553,6 +1594,11 @@ static void LSRSaveHomePreview(void) {
         if (!coordinator || ![coordinator instancesRespondToSelector:@selector(start)]
             || ![coordinator instancesRespondToSelector:@selector(navigationController)]) return;
         %init(LSRPaneCore);
+        for (NSString *name in @[@"LSRWallpaperSettingsController", @"LSRWallpaperGridController",
+                                 @"LSRWallpaperPreviewController", @"WallpaperSettings.WallpaperAlbumListController",
+                                 @"WallpaperAlbumListTableViewController"]) {
+            LSRAddSettingsPageMethods(NSClassFromString(name));
+        }
         if (NSClassFromString(@"PSURLManager")) %init(LSRPaneURLGuard);
         Class albumList = NSClassFromString(@"WallpaperSettings.WallpaperAlbumListController");
         if (albumList && NSClassFromString(@"WallpaperAlbumListTableViewControllerPhoneSpec")) {
