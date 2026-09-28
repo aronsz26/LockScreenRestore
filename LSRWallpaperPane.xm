@@ -517,17 +517,28 @@ static UIImage *LSRDynamicPlaceholder(CGSize size) {
     NSArray<UILabel *> *_labels;
 }
 
-static const CGFloat kLSRCollectionsInset = 16.0;
-static const CGFloat kLSRCollectionsGap = 11.0;
+// iOS 15's values (WallpaperSettings: WSBundleCollectionsTableViewCell, WSBundleCollectionOptionView
+// and WallpaperAlbumListTableViewController _updateLayout): 15pt around the row, 9pt between the
+// tiles (8.5 on 2x screens), tiles as tall as the screen's aspect, a 15pt label the system
+// spacing below.
+static const CGFloat kLSRCollectionsInset = 15.0;
+static const CGFloat kLSRCollectionsLabelGap = 8.0;
+static const CGFloat kLSRCollectionsLabelHeight = 18.0;
+
+static CGFloat LSRCollectionsGap(void) {
+    return [UIScreen mainScreen].scale > 2.0 ? 9.0 : 8.5;
+}
 
 + (CGSize)tileSizeForWidth:(CGFloat)width {
     CGSize screen = [UIScreen mainScreen].bounds.size;
-    CGFloat w = floor((width - 2 * kLSRCollectionsInset - 2 * kLSRCollectionsGap) / 3);
-    return CGSizeMake(w, round(w * MAX(screen.width, screen.height) / MIN(screen.width, screen.height)));
+    CGFloat scale = [UIScreen mainScreen].scale;
+    CGFloat w = floor((width - 2 * kLSRCollectionsInset - 2 * LSRCollectionsGap()) / 3 * scale) / scale;
+    return CGSizeMake(w, round(w * MAX(screen.width, screen.height) / MIN(screen.width, screen.height) * scale) / scale);
 }
 
 + (CGFloat)heightForWidth:(CGFloat)width {
-    return 16 + [self tileSizeForWidth:width].height + 12 + 24 + 16;
+    return kLSRCollectionsInset + [self tileSizeForWidth:width].height + kLSRCollectionsLabelGap
+        + kLSRCollectionsLabelHeight + kLSRCollectionsInset;
 }
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)identifier {
@@ -543,13 +554,13 @@ static const CGFloat kLSRCollectionsGap = 11.0;
             tile.contentHorizontalAlignment = UIControlContentHorizontalAlignmentFill;
             tile.contentVerticalAlignment = UIControlContentVerticalAlignmentFill;
             tile.layer.borderWidth = 1.0 / [UIScreen mainScreen].scale;
-            tile.layer.borderColor = [UIColor separatorColor].CGColor;
+            tile.layer.borderColor = [UIColor tertiaryLabelColor].CGColor;
             [tile addTarget:self action:@selector(_tapped:) forControlEvents:UIControlEventTouchUpInside];
             [self.contentView addSubview:tile];
             [tiles addObject:tile];
             UILabel *label = [UILabel new];
             label.text = LSRWallpaperKindTitle((LSRWallpaperKind)kind);
-            label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+            label.font = [UIFont systemFontOfSize:15.0];
             label.textColor = [UIColor labelColor];
             [self.contentView addSubview:label];
             [labels addObject:label];
@@ -584,15 +595,16 @@ static const CGFloat kLSRCollectionsGap = 11.0;
     [super layoutSubviews];
     CGSize tile = [LSRCollectionsCell tileSizeForWidth:self.contentView.bounds.size.width];
     for (NSUInteger i = 0; i < _tiles.count; i++) {
-        CGFloat x = kLSRCollectionsInset + i * (tile.width + kLSRCollectionsGap);
-        _tiles[i].frame = CGRectMake(x, 16, tile.width, tile.height);
-        _labels[i].frame = CGRectMake(x, 16 + tile.height + 10, tile.width, 26);
+        CGFloat x = kLSRCollectionsInset + i * (tile.width + LSRCollectionsGap());
+        _tiles[i].frame = CGRectMake(x, kLSRCollectionsInset, tile.width, tile.height);
+        _labels[i].frame = CGRectMake(x, kLSRCollectionsInset + tile.height + kLSRCollectionsLabelGap,
+                                      tile.width, kLSRCollectionsLabelHeight);
     }
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {
     [super traitCollectionDidChange:previous];
-    for (UIButton *tile in _tiles) tile.layer.borderColor = [UIColor separatorColor].CGColor;
+    for (UIButton *tile in _tiles) tile.layer.borderColor = [UIColor tertiaryLabelColor].CGColor;
 }
 
 - (void)_tapped:(UIButton *)tile {
