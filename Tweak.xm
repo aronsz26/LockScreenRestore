@@ -128,7 +128,7 @@ static const CGFloat kIOS15DateBaselineToList = 29.0;
 // 0 = a screen iOS 15 didn't have (Dynamic Island): then 0.8x iOS 16's size.
 static CGFloat LSRIOS15ClockSize(CGFloat screenHeight) {
     if (screenHeight == 568.0 || screenHeight == 667.0) return 70.0;  // SE, 8
-    if (screenHeight == 736.0) return 90.0;                           // 8 Plus
+    if (screenHeight == 736.0) return 86.0;                           // 8 Plus (measured on iOS 15: 62pt digits)
     if (screenHeight == 812.0 || screenHeight == 844.0) return 80.0;  // X, XS, 11 Pro, 12/13 (mini, Pro)
     if (screenHeight == 896.0 || screenHeight == 926.0) return 90.0;  // XR, XS Max, 11, Pro Max, 14 Plus
     return 0;
@@ -1009,12 +1009,13 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     if (!on) return;
     UIInterpolatingMotionEffect *x = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.x"
         type:UIInterpolatingMotionEffectTypeTiltAlongHorizontalAxis];
-    x.minimumRelativeValue = @(-kLSRPerspectiveMargin);
-    x.maximumRelativeValue = @(kLSRPerspectiveMargin);
+    // Like iOS: the wallpaper moves against the tilt, so it seems to lie behind the screen.
+    x.minimumRelativeValue = @(kLSRPerspectiveMargin);
+    x.maximumRelativeValue = @(-kLSRPerspectiveMargin);
     UIInterpolatingMotionEffect *y = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.y"
         type:UIInterpolatingMotionEffectTypeTiltAlongVerticalAxis];
-    y.minimumRelativeValue = @(-kLSRPerspectiveMargin);
-    y.maximumRelativeValue = @(kLSRPerspectiveMargin);
+    y.minimumRelativeValue = @(kLSRPerspectiveMargin);
+    y.maximumRelativeValue = @(-kLSRPerspectiveMargin);
     UIMotionEffectGroup *group = [UIMotionEffectGroup new];
     group.motionEffects = @[x, y];
     [_contentView addMotionEffect:group];

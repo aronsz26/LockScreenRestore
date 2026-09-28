@@ -244,7 +244,7 @@ The tweak works out every size and position each time SpringBoard starts, from v
 
 | Element | Source |
 |---|---|
-| Clock size | iOS 15's own size per screen: 70 pt (8, SE), 80 pt (X, XS, 11 Pro, 12, 13), 90 pt (8 Plus, XR, 11, Pro Max). iPhones iOS 15 never ran on (14 Pro): 0.8 × iOS 16's clock |
+| Clock size | iOS 15's own size per screen: 70 pt (8, SE), 80 pt (X, XS, 11 Pro, 12, 13), 86 pt (8 Plus), 90 pt (XR, 11, Pro Max). iPhones iOS 15 never ran on (14 Pro): 0.8 × iOS 16's clock |
 | Clock and date position | iOS 15's own rule: status area + clock size, but at least 175 pt (Face ID), 154 pt (8 Plus) or 140 pt (8, SE); date 36 pt below the time |
 | Padlock position | 76 pt on Face ID iPhones, like iOS 15 |
 | Date size | iOS's own per-device value (`dateLabelFontSize`) |
