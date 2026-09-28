@@ -10,9 +10,9 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
 <p align="center">
   <img src="screenshots/lockscreen.jpg" width="200" alt="Lock screen with the iOS 15 clock, padlock and Focus pill">
   &nbsp;
-  <img src="screenshots/notifications.jpg" width="200" alt="Notification Centre header and iOS 15 notification cards under the clock">
+  <img src="screenshots/notifications.jpg" width="200" alt="iOS 15 notification cards listed under the clock">
   &nbsp;
-  <img src="screenshots/music.jpg" width="200" alt="iOS 15 music player with large artwork, AirPlay button and volume slider">
+  <img src="screenshots/music.jpg" width="200" alt="iOS 15 music player with large artwork, app icon, AirPlay button and volume slider">
   &nbsp;
   <img src="screenshots/settings.jpg" width="200" alt="LockScreenRestore settings with one switch per feature">
 </p>
