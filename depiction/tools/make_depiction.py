@@ -33,6 +33,9 @@ details = [
 ]
 changelog = [
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
+        "**1.9.3**\n- Settings → Wallpaper stays open when you leave Settings and come back\n"
+        "- Perspective Zoom moves the right way again\n- iPhone 8 Plus: clock size exactly like iOS 15"},
+    {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "**1.9.2**\n- The list below the clock starts where it did on iOS 15\n- Notifications are always shown as a list\n"
         "- The music player shows the playing app's icon on the artwork\n- Focus pill no longer jumps down after scrolling\n"
         "- Reset to Defaults in the settings\n- Settings → Wallpaper: iOS 15 spacing for Dynamic · Stills · Live"},
