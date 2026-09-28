@@ -98,6 +98,9 @@ static void LSRDebugLog(NSString *format, ...) {
 // - the date's descenders reach 0.21em below its baseline; content under the date (the Focus
 //   pill, whose item has 10pt of built-in top padding) starts right there
 static const CGFloat kIOS15ClockScale = 0.8;
+// Settings > Clock Size (1 = as calculated). The 0.8 ratio was measured on a Face ID iPhone;
+// on others (reported: iPhone 8 Plus) the clock can come out small, so people can adjust it.
+static CGFloat sLSRClockSizeFactor = 1.0;
 // Weights on the system font's weight axis (Thin 111, Light 274, Regular 400, Medium 510).
 // Clock: Thin looked slightly too thin, 220 and 250 too thick, 170 matched. Date: Regular (170
 // looked too thin, Medium too heavy). UIFontWeight values between the named weights get
@@ -136,7 +139,7 @@ static LSRLayout LSRCurrentLayout(void) {
         UIFont *iOS16TimeFont = [dateViewClass respondsToSelector:@selector(timeFont)] ? [dateViewClass timeFont] : nil;
         CGFloat iOS16TimeSize = iOS16TimeFont.pointSize > 0 ? iOS16TimeFont.pointSize : 100.0;
 
-        layout.clockFontSize = round(iOS16TimeSize * kIOS15ClockScale);
+        layout.clockFontSize = round(iOS16TimeSize * kIOS15ClockScale * sLSRClockSizeFactor);
         layout.dateFontSize = LSRClassMetric(@"SBFLockScreenMetrics", @"dateLabelFontSize", 20.0);
         layout.dateBaselineY = LSRClassMetric(@"SBFLockScreenMetrics", @"subtitleBaselineOffsetFromTopOfScreen", 211.0);
         layout.timeBaselineY = layout.dateBaselineY - kIOS15TimeBaselineAboveDate * layout.clockFontSize;
@@ -1727,6 +1730,8 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     }
     if (![process isEqualToString:@"SpringBoard"]) return;
     sLSRClockEnabled = LSRPrefEnabled(prefs, @"clockEnabled");
+    id clockSize = prefs[@"clockSize"];
+    if ([clockSize isKindOfClass:[NSNumber class]]) sLSRClockSizeFactor = MIN(MAX([clockSize doubleValue], 0.7), 1.5);
     if (sLSRClockEnabled) %init(LSRClock);
     if (LSRPrefEnabled(prefs, @"focusEnabled")) %init(LSRFocus);
     if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);

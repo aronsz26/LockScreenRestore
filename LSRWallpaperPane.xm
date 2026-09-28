@@ -968,6 +968,8 @@ static void LSRDownloadRemoteDesign(LSRRemoteDesign *design, void (^completion)(
         NSFileManager *fm = [NSFileManager defaultManager];
         NSString *target = [kLSRPaneWallpapersDir stringByAppendingPathComponent:design.name];
         if (ok) {
+            // A fresh install has no wallpapers folder yet.
+            [fm createDirectoryAtPath:kLSRPaneWallpapersDir withIntermediateDirectories:YES attributes:nil error:nil];
             [fm removeItemAtPath:target error:nil];
             ok = [fm moveItemAtPath:staging toPath:target error:nil];
         }
@@ -1243,7 +1245,7 @@ static void LSRRemoteThumbnail(LSRRemoteDesign *design, void (^completion)(UIIma
 @property (nonatomic, readonly) UINavigationController *navigationController;
 @end
 
-%group LSRSettingsPane
+%group LSRPaneCore
 
 %hook WSWallpaperSettingsCoordinator
 - (void)start {
@@ -1257,10 +1259,14 @@ static void LSRRemoteThumbnail(LSRRemoteDesign *design, void (^completion)(UIIma
 }
 %end
 
+%end // LSRPaneCore
+
 // Choose: iOS's own album list, with our Dynamic / Stills / Live row in the (on iPhone empty)
 // wallpaper collections row at the top.
 @interface WallpaperAlbumListController : UIViewController
 @end
+
+%group LSRPaneChoose
 
 %hook WallpaperAlbumListController
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -1277,6 +1283,8 @@ static void LSRRemoteThumbnail(LSRRemoteDesign *design, void (^completion)(UIIma
     return %orig;
 }
 %end
+
+%end // LSRPaneChoose
 
 // Photos from an album open in iOS's legacy preview (SBSUIWallpaperPreviewViewController, which
 // already has iOS 15's Move & Scale). On iOS 16 it draws the iOS 16 clock (SBFLockScreenDateView)
@@ -1296,6 +1304,8 @@ static UIView *LSRPaneFindSubview(UIView *root, Class cls) {
     }
     return nil;
 }
+
+%group LSRPanePreview
 
 %hook SBSUIWallpaperPreviewView
 - (void)layoutSubviews {
@@ -1380,8 +1390,12 @@ static UIImage *LSRFramedPreviewImage(SBSUIWallpaperPreviewViewController *contr
 }
 %end
 
+%end // LSRPanePreview
+
 // Settings saves where you are when it goes to the background, asking every controller on the
 // stack for Settings-specific details ours don't have; don't let that take the app down.
+%group LSRPaneURLGuard
+
 %hook PSURLManager
 - (id)urlForCurrentNavStack {
     @try {
@@ -1392,7 +1406,7 @@ static UIImage *LSRFramedPreviewImage(SBSUIWallpaperPreviewViewController *contr
 }
 %end
 
-%end // LSRSettingsPane
+%end // LSRPaneURLGuard
 
 #pragma mark - SpringBoard: home screen preview
 
@@ -1461,9 +1475,25 @@ static void LSRSaveHomePreview(void) {
     // Part of "iOS 15 Live Wallpaper": switched off, Settings > Wallpaper is iOS 16's again.
     if (!LSRPanePrefEnabled(prefs, @"liveWallpaperEnabled", YES)) return;
     if ([process isEqualToString:@"Preferences"]) {
+        // Built against iOS 16's Settings; elsewhere keep the system page (iOS 17 moved things
+        // around, and our lock screen wallpaper doesn't run there yet).
+        if ([NSProcessInfo processInfo].operatingSystemVersion.majorVersion != 16) return;
         // Loaded on demand by Settings; load it now so the coordinator class exists to hook.
         dlopen("/System/Library/PrivateFrameworks/Settings/WallpaperSettings.framework/WallpaperSettings", RTLD_NOW);
-        %init(LSRSettingsPane, WallpaperAlbumListController = NSClassFromString(@"WallpaperSettings.WallpaperAlbumListController"));
+        // Only replace the page if everything it hooks exists here; a missing class leaves
+        // that part (or the whole page) as iOS has it instead of crashing Settings.
+        Class coordinator = NSClassFromString(@"WSWallpaperSettingsCoordinator");
+        if (!coordinator || ![coordinator instancesRespondToSelector:@selector(start)]
+            || ![coordinator instancesRespondToSelector:@selector(navigationController)]) return;
+        %init(LSRPaneCore);
+        if (NSClassFromString(@"PSURLManager")) %init(LSRPaneURLGuard);
+        Class albumList = NSClassFromString(@"WallpaperSettings.WallpaperAlbumListController");
+        if (albumList && NSClassFromString(@"WallpaperAlbumListTableViewControllerPhoneSpec")) {
+            %init(LSRPaneChoose, WallpaperAlbumListController = albumList);
+        }
+        if (NSClassFromString(@"SBSUIWallpaperPreviewView") && NSClassFromString(@"SBSUIWallpaperPreviewViewController")) {
+            %init(LSRPanePreview);
+        }
     } else if ([process isEqualToString:@"SpringBoard"]) {
         %init(LSRHomePreview);
     }

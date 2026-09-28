@@ -113,6 +113,8 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 | iOS 15 Music Player | On | iOS 16 player |
 | iOS 15 Live Wallpaper | On | iOS 16 wallpapers, lock screen editor and Settings → Wallpaper page |
 
+**Clock Size** (under iOS 15 Clock) scales the clock relative to the calculated iOS 15 size, from 0.7 to 1.5. Use it if the clock looks too small or too big on your iPhone (reported on iPhone 8 Plus).
+
 Switches take effect after a respring: tap **Apply (Respring)** at the bottom of the page.
 
 **Fix Positions** shows which iPhone and screen size were detected and recalculates all positions with a respring. The tweak also does this by itself every time SpringBoard starts.
@@ -169,7 +171,7 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 | iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Supported, untested |
 | iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
 | iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Supported, untested (padlock least certain) |
-| iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported, untested (padlock least certain) |
+| iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported; clock reported a little small on 8 Plus, use **Clock Size** |
 
 **Tested it on one of the untested iPhones?** Please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot of the lock screen, whether it looks right or not. Every report helps move a row to ✅.
 
