@@ -118,7 +118,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 | iOS 15 Unlock Animation | On | iOS 16 unlock transition |
 | iOS 15 Live Wallpaper | On | iOS 16 wallpapers, lock screen editor and Settings → Wallpaper page |
 
-**Clock Size** (under iOS 15 Clock) scales the clock relative to the calculated iOS 15 size, from 0.7 to 1.5. Use it if the clock looks too small or too big on your iPhone (reported on iPhone 8 Plus).
+**Clock Size** (under iOS 15 Clock) scales the clock relative to iOS 15's size for your iPhone, from 0.7 to 1.5, if you'd like it bigger or smaller.
 
 Switches take effect after a respring: tap **Apply (Respring)** at the bottom of the page.
 
@@ -176,7 +176,7 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 | iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Reported on iPhone XR: clock position fixed in 1.9 |
 | iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
 | iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Supported, untested (padlock least certain) |
-| iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported; clock reported a little small on 8 Plus, use **Clock Size** |
+| iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported, untested (clock size fixed after a report on 8 Plus) |
 
 **Tested it on one of the untested iPhones?** Please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot of the lock screen, whether it looks right or not. Every report helps move a row to ✅.
 
@@ -237,11 +237,12 @@ The tweak works out every size and position each time SpringBoard starts, from v
 
 | Element | Source |
 |---|---|
-| Clock and date position (Face ID iPhones) | iOS 15's own values: same height on every Face ID iPhone (top of the digits at 118 pt, padlock at 76 pt, date 36 pt below the time) |
-| Date position (Touch ID iPhones) and size | iOS's own per-device values (`subtitleBaselineOffsetFromTopOfScreen`, `dateLabelFontSize`) |
+| Clock size | iOS 15's own size per screen: 70 pt (8, SE), 80 pt (X, XS, 11 Pro, 12, 13), 90 pt (8 Plus, XR, 11, Pro Max). iPhones iOS 15 never ran on (14 Pro): 0.8 × iOS 16's clock |
+| Clock and date position | iOS 15's own rule: status area + clock size, but at least 175 pt (Face ID), 154 pt (8 Plus) or 140 pt (8, SE); date 36 pt below the time |
+| Padlock position | 76 pt on Face ID iPhones, like iOS 15 |
+| Date size | iOS's own per-device value (`dateLabelFontSize`) |
 | Padlock size | iOS's own scale factor (`proudLockScaleFactor`) |
-| Clock size | 0.8 × iOS 16's clock size on the same device |
-| Padlock (Touch ID iPhones) and Focus pill position | fixed ratios to the clock size and the date, measured on iOS 15 |
+| Focus pill position | fixed ratios to the clock size and the date, measured on iOS 15 |
 | Charging battery | centered on the clock and date |
 
 On Touch ID iPhones (iPhone 8, 8 Plus, SE) and Dynamic Island iPhones (iPhone 14 Pro, 14 Pro Max), iOS draws the padlock differently, so the padlock part is the least certain there.

@@ -99,8 +99,7 @@ static void LSRDebugLog(NSString *format, ...) {
 // - the date's descenders reach 0.21em below its baseline; content under the date (the Focus
 //   pill, whose item has 10pt of built-in top padding) starts right there
 static const CGFloat kIOS15ClockScale = 0.8;
-// Settings > Clock Size (1 = as calculated). The 0.8 ratio was measured on a Face ID iPhone;
-// on others (reported: iPhone 8 Plus) the clock can come out small, so people can adjust it.
+// Settings > Clock Size (1 = iOS 15's size), for anyone who wants it bigger or smaller.
 static CGFloat sLSRClockSizeFactor = 1.0;
 // Weights on the system font's weight axis (Thin 111, Light 274, Regular 400, Medium 510).
 // Clock: Thin looked slightly too thin, 220 and 250 too thick, 170 matched. Date: Regular (170
@@ -113,12 +112,26 @@ static const CGFloat kIOS15TimeBaselineAboveDate = 0.441;
 static const CGFloat kSFDigitHeight = 0.717;
 static const CGFloat kIOS15PadlockCenterAboveDigits = 0.531;
 static const CGFloat kSFDescender = 0.21;
-// Face ID iPhones on iOS 15 (SpringBoardFoundation's SBFDashBoardViewMetrics, and measured on
-// an iPhone 13 Pro and XR): the top of the digits, the padlock's center and the time-to-date
-// baseline distance are the same on all of them; only the clock's size differs.
-static const CGFloat kIOS15FaceIDDigitsTop = 118.0;
+// iOS 15's clock on iPhones (SpringBoardFoundation 15.6.1: SBFLockScreenDateView timeFont,
+// SBFDashBoardViewMetrics timeLabelBaselineY/searchClippingLineMaxY; checked against an
+// iPhone 13 Pro and XR): a fixed size per screen, the time baseline at the status area plus the
+// clock size but not above a minimum, and the date 36pt below the time.
+static const CGFloat kIOS15FaceIDTimeBaselineMin = 175.0;
+static const CGFloat kIOS15PlusTimeBaselineMin = 154.0;
+static const CGFloat kIOS15HomeButtonTimeBaselineMin = 140.0;
+static const CGFloat kIOS15FaceIDStatusArea = 92.0;
+static const CGFloat kIOS15HomeButtonStatusArea = 68.0;
+static const CGFloat kIOS15TimeToDate = 36.0;
 static const CGFloat kIOS15FaceIDPadlockCenter = 76.0;
-static const CGFloat kIOS15FaceIDTimeToDate = 36.0;
+
+// 0 = a screen iOS 15 didn't have (Dynamic Island): then 0.8x iOS 16's size.
+static CGFloat LSRIOS15ClockSize(CGFloat screenHeight) {
+    if (screenHeight == 568.0 || screenHeight == 667.0) return 70.0;  // SE, 8
+    if (screenHeight == 736.0) return 90.0;                           // 8 Plus
+    if (screenHeight == 812.0 || screenHeight == 844.0) return 80.0;  // X, XS, 11 Pro, 12/13 (mini, Pro)
+    if (screenHeight == 896.0 || screenHeight == 926.0) return 90.0;  // XR, XS Max, 11, Pro Max, 14 Plus
+    return 0;
+}
 
 typedef struct {
     CGFloat clockFontSize;
@@ -146,22 +159,29 @@ static LSRLayout LSRCurrentLayout(void) {
         UIFont *iOS16TimeFont = [dateViewClass respondsToSelector:@selector(timeFont)] ? [dateViewClass timeFont] : nil;
         CGFloat iOS16TimeSize = iOS16TimeFont.pointSize > 0 ? iOS16TimeFont.pointSize : 100.0;
 
-        layout.clockFontSize = round(iOS16TimeSize * kIOS15ClockScale * sLSRClockSizeFactor);
+        CGSize screen = [UIScreen mainScreen].bounds.size;
+        CGFloat screenHeight = MAX(screen.width, screen.height);
+        BOOL phone = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+        BOOL faceID = phone && screenHeight >= 812.0;
+        CGFloat iOS15Size = phone ? LSRIOS15ClockSize(screenHeight) : 0;
+        layout.clockFontSize = round((iOS15Size > 0 ? iOS15Size : iOS16TimeSize * kIOS15ClockScale) * sLSRClockSizeFactor);
         layout.dateFontSize = LSRClassMetric(@"SBFLockScreenMetrics", @"dateLabelFontSize", 20.0);
         layout.padlockScale = 1.0 / LSRClassMetric(@"SBFLockScreenMetrics", @"proudLockScaleFactor", 0.5);
 
         CGFloat digitsTop, padlockCenter;
-        CGSize screen = [UIScreen mainScreen].bounds.size;
-        BOOL faceIDPhone = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone
-            && MAX(screen.width, screen.height) >= 812.0;
-        if (faceIDPhone) {
-            // iOS 15 put the clock at the same height on every Face ID iPhone. The metric used
-            // below only matches that on some of them (off on the iPhone X with 16.7, missing
-            // on iOS 17).
-            digitsTop = kIOS15FaceIDDigitsTop;
-            padlockCenter = kIOS15FaceIDPadlockCenter;
-            layout.timeBaselineY = digitsTop + kSFDigitHeight * layout.clockFontSize;
-            layout.dateBaselineY = layout.timeBaselineY + kIOS15FaceIDTimeToDate * sLSRClockSizeFactor;
+        if (phone) {
+            // iOS 15's own placement (SBFDashBoardViewMetrics timeLabelBaselineY): below the
+            // status area by the clock's size, but never above a per-device minimum. The metric
+            // used on iPads below is off on some iPhones (iPhone X with 16.7) and missing on iOS 17.
+            CGFloat minimum = faceID ? kIOS15FaceIDTimeBaselineMin
+                : (screenHeight >= 736.0 ? kIOS15PlusTimeBaselineMin : kIOS15HomeButtonTimeBaselineMin);
+            CGFloat statusArea = faceID ? kIOS15FaceIDStatusArea : kIOS15HomeButtonStatusArea;
+            layout.timeBaselineY = MAX(minimum, statusArea + layout.clockFontSize);
+            layout.dateBaselineY = layout.timeBaselineY + kIOS15TimeToDate * sLSRClockSizeFactor;
+            digitsTop = layout.timeBaselineY - kSFDigitHeight * layout.clockFontSize;
+            // Face ID iPhones: the padlock sits at the same height on all of them.
+            padlockCenter = faceID ? kIOS15FaceIDPadlockCenter
+                : digitsTop - kIOS15PadlockCenterAboveDigits * layout.clockFontSize;
         } else {
             layout.dateBaselineY = LSRClassMetric(@"SBFLockScreenMetrics", @"subtitleBaselineOffsetFromTopOfScreen", 211.0);
             layout.timeBaselineY = layout.dateBaselineY - kIOS15TimeBaselineAboveDate * layout.clockFontSize;
