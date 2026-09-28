@@ -1,6 +1,6 @@
 # LockScreenRestore
 
-Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player, live wallpapers and the old **Settings → Wallpaper** page.
+Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player, unlock animation, live and dynamic wallpapers and the old **Settings → Wallpaper** page.
 
 > [!IMPORTANT]
 > **This is a beta.** So far it's been tested on an **iPhone 13 Pro (iOS 16.1.1)** and an **iPhone 12 Pro (iOS 16.5)**, both with Dopamine. Positions are calculated for every screen, but other screen sizes haven't been checked yet.
@@ -41,7 +41,8 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 | Notifications | Collected at the bottom | Listed right under the clock, iOS 15 cards |
 | Music player | Compact Live Activity | iOS 15 player with volume slider |
 | Charging | Battery drawn under the padlock | Battery where the clock is |
-| Wallpaper | Posters, no live wallpapers | Live wallpapers, iOS 15 wallpaper settings |
+| Unlock | Same blur on every unlock, home wallpaper static | iOS 15 transition: home wallpaper follows the swipe |
+| Wallpaper | Posters, no live or dynamic wallpapers | Live and Dynamic wallpapers, Perspective Zoom, iOS 15 wallpaper settings |
 
 ### 🕘 iOS 15 Clock
 
@@ -53,6 +54,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 - No depth effect: the wallpaper no longer covers the clock
 - No lock screen widgets (iOS 15 had none)
 - When you plug in, the charging battery appears where the clock is, like on iOS 15
+- **iOS 15 unlock animation:** the home screen wallpaper follows your swipe with a little parallax, and the lock screen only blurs when lock and home screen have different wallpapers
 - Sizes and positions adapt to your iPhone's screen ([how](#how-positions-are-calculated))
 
 ### 🌙 iOS 15 Focus
@@ -88,6 +90,8 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 ### 🖼️ iOS 15 Live Wallpaper
 
 - **Live wallpapers are back** (iOS 16 removed them): press and hold the lock screen to play
+- **Dynamic wallpapers are back**: the animated bubble wallpapers from iOS 15, in all their colors
+- **Perspective Zoom**: the wallpaper moves slightly as you tilt your iPhone (can be turned off in the wallpaper preview)
 - Switches automatically between the Light and Dark version with the system appearance
 - **Settings → Wallpaper is the iOS 15 page again:**
   - *Choose a New Wallpaper*, a lock screen and a home screen preview side by side, and *Dark Appearance Dims Wallpaper*
@@ -111,6 +115,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 | iOS 15 Focus | On | Focus at the bottom again |
 | iOS 15 Notifications | On | iOS 16 notification list |
 | iOS 15 Music Player | On | iOS 16 player |
+| iOS 15 Unlock Animation | On | iOS 16 unlock transition |
 | iOS 15 Live Wallpaper | On | iOS 16 wallpapers, lock screen editor and Settings → Wallpaper page |
 
 **Clock Size** (under iOS 15 Clock) scales the clock relative to the calculated iOS 15 size, from 0.7 to 1.5. Use it if the clock looks too small or too big on your iPhone (reported on iPhone 8 Plus).
@@ -154,7 +159,7 @@ Each wallpaper is a folder with the still image and the video for Light and Dark
 
 </details>
 
-**Dynamic** is empty for now.
+**Dynamic** wallpapers need no download: iOS 16 still ships them, the tweak just brings them back.
 
 If you'd rather keep iOS 16's wallpapers, turn **iOS 15 Live Wallpaper** off: that also brings back iOS 16's Settings → Wallpaper page and the lock screen editor.
 
@@ -167,8 +172,8 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 | iPhone 13 Pro | 390 × 844 pt | ✅ Tested (iOS 16.1.1) |
 | iPhone 12 Pro | 390 × 844 pt | ✅ Tested (iOS 16.5) |
 | iPhone 12, 13, 14 | 390 × 844 pt | Should work (same screen as tested) |
-| iPhone X, XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Supported, untested |
-| iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Supported, untested |
+| iPhone X, XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Reported on iPhone X (16.7): clock position fixed in 1.9, notification overlap being looked at |
+| iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Reported on iPhone XR: clock position fixed in 1.9 |
 | iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
 | iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Supported, untested (padlock least certain) |
 | iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported; clock reported a little small on 8 Plus, use **Clock Size** |
@@ -188,7 +193,6 @@ For the full iOS 15 look, also set **Settings → Notifications → Display As �
 ## Known limitations
 
 - **Beta:** only tested on one iPhone and one iOS version (see [Compatibility](#compatibility)).
-- **Dynamic** has no wallpapers yet.
 - Downloadable wallpapers depend on the [SniperGER/iOS-Wallpapers](https://github.com/SniperGER/iOS-Wallpapers) archive being online.
 - The Dock and folder backgrounds on the home screen may still be a blurred version of your iOS 16 wallpaper.
 - The home screen preview in Settings → Wallpaper is a small screenshot of your home screen, taken when you unlock to it. After changing the home screen wallpaper it shows the wallpaper without icons until you unlock again. The screenshot stays on your iPhone (`/var/mobile/Library/LockScreenRestore/HomePreview.jpg`).
@@ -229,14 +233,15 @@ make package FINALPACKAGE=1 install
 
 ## How positions are calculated
 
-SpringBoard on iOS 16 still carries per-device lock screen measurements from iOS 15 (`SBFLockScreenMetrics`). The tweak reads them on every launch and combines them with ratios measured on Apple's iOS 15 lock screen:
+The tweak works out every size and position each time SpringBoard starts, from values taken from iOS 15 itself, iOS 16's per-device lock screen measurements (`SBFLockScreenMetrics`) and ratios measured on Apple's iOS 15 lock screen:
 
 | Element | Source |
 |---|---|
-| Date position and size | iOS's own per-device values (`subtitleBaselineOffsetFromTopOfScreen`, `dateLabelFontSize`) |
+| Clock and date position (Face ID iPhones) | iOS 15's own values: same height on every Face ID iPhone (top of the digits at 118 pt, padlock at 76 pt, date 36 pt below the time) |
+| Date position (Touch ID iPhones) and size | iOS's own per-device values (`subtitleBaselineOffsetFromTopOfScreen`, `dateLabelFontSize`) |
 | Padlock size | iOS's own scale factor (`proudLockScaleFactor`) |
 | Clock size | 0.8 × iOS 16's clock size on the same device |
-| Clock, padlock and Focus pill position | fixed ratios to the clock size and the date, measured on iOS 15 |
+| Padlock (Touch ID iPhones) and Focus pill position | fixed ratios to the clock size and the date, measured on iOS 15 |
 | Charging battery | centered on the clock and date |
 
 On Touch ID iPhones (iPhone 8, 8 Plus, SE) and Dynamic Island iPhones (iPhone 14 Pro, 14 Pro Max), iOS draws the padlock differently, so the padlock part is the least certain there.

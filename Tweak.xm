@@ -113,6 +113,12 @@ static const CGFloat kIOS15TimeBaselineAboveDate = 0.441;
 static const CGFloat kSFDigitHeight = 0.717;
 static const CGFloat kIOS15PadlockCenterAboveDigits = 0.531;
 static const CGFloat kSFDescender = 0.21;
+// Face ID iPhones on iOS 15 (SpringBoardFoundation's SBFDashBoardViewMetrics, and measured on
+// an iPhone 13 Pro and XR): the top of the digits, the padlock's center and the time-to-date
+// baseline distance are the same on all of them; only the clock's size differs.
+static const CGFloat kIOS15FaceIDDigitsTop = 118.0;
+static const CGFloat kIOS15FaceIDPadlockCenter = 76.0;
+static const CGFloat kIOS15FaceIDTimeToDate = 36.0;
 
 typedef struct {
     CGFloat clockFontSize;
@@ -142,12 +148,26 @@ static LSRLayout LSRCurrentLayout(void) {
 
         layout.clockFontSize = round(iOS16TimeSize * kIOS15ClockScale * sLSRClockSizeFactor);
         layout.dateFontSize = LSRClassMetric(@"SBFLockScreenMetrics", @"dateLabelFontSize", 20.0);
-        layout.dateBaselineY = LSRClassMetric(@"SBFLockScreenMetrics", @"subtitleBaselineOffsetFromTopOfScreen", 211.0);
-        layout.timeBaselineY = layout.dateBaselineY - kIOS15TimeBaselineAboveDate * layout.clockFontSize;
         layout.padlockScale = 1.0 / LSRClassMetric(@"SBFLockScreenMetrics", @"proudLockScaleFactor", 0.5);
 
-        CGFloat digitsTop = layout.timeBaselineY - kSFDigitHeight * layout.clockFontSize;
-        CGFloat padlockCenter = digitsTop - kIOS15PadlockCenterAboveDigits * layout.clockFontSize;
+        CGFloat digitsTop, padlockCenter;
+        CGSize screen = [UIScreen mainScreen].bounds.size;
+        BOOL faceIDPhone = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone
+            && MAX(screen.width, screen.height) >= 812.0;
+        if (faceIDPhone) {
+            // iOS 15 put the clock at the same height on every Face ID iPhone. The metric used
+            // below only matches that on some of them (off on the iPhone X with 16.7, missing
+            // on iOS 17).
+            digitsTop = kIOS15FaceIDDigitsTop;
+            padlockCenter = kIOS15FaceIDPadlockCenter;
+            layout.timeBaselineY = digitsTop + kSFDigitHeight * layout.clockFontSize;
+            layout.dateBaselineY = layout.timeBaselineY + kIOS15FaceIDTimeToDate * sLSRClockSizeFactor;
+        } else {
+            layout.dateBaselineY = LSRClassMetric(@"SBFLockScreenMetrics", @"subtitleBaselineOffsetFromTopOfScreen", 211.0);
+            layout.timeBaselineY = layout.dateBaselineY - kIOS15TimeBaselineAboveDate * layout.clockFontSize;
+            digitsTop = layout.timeBaselineY - kSFDigitHeight * layout.clockFontSize;
+            padlockCenter = digitsTop - kIOS15PadlockCenterAboveDigits * layout.clockFontSize;
+        }
         CGFloat iOS16PadlockCenter = LSRClassMetric(@"SBFLockScreenMetrics", @"proudLockCenterFromTopOfScreen", 64.5);
         layout.padlockDrop = padlockCenter - iOS16PadlockCenter;
     });
@@ -1760,6 +1780,103 @@ static void LSRRoundActivityPlatter(UIView *view, NSUInteger depth) {
 
 %end // LSRMediaPlatter
 
+#pragma mark - Unlock animation
+
+// iOS 15's unlock transition. Both versions drive it from CSCoverSheetTransitionsSettings, one
+// block of settings per case (same or different lock/home wallpaper, first or later swipe, over
+// an app). These are iOS 15.6.1's defaults (CoverSheet's setDefaultValues and
+// setDefaultValuesForParallaxAndBlur): the home screen wallpaper follows the swipe with
+// parallax, and the sheet only blurs when the wallpapers differ. (iOS 16's getters hide some
+// of these again where its own transition doesn't use them.)
+static void LSRSetTransitionValue(id settings, NSString *key, id value) {
+    if (!settings) return;
+    // Straight to the setter: BOOL or double, depending on the key.
+    SEL setter = NSSelectorFromString([NSString stringWithFormat:@"set%@%@:",
+        [[key substringToIndex:1] uppercaseString], [key substringFromIndex:1]]);
+    NSMethodSignature *signature = [settings methodSignatureForSelector:setter];
+    if (!signature || signature.numberOfArguments != 3) return; // A key iOS 16 doesn't have.
+    const char *type = [signature getArgumentTypeAtIndex:2];
+    if (type[0] == 'd') {
+        ((void (*)(id, SEL, double))objc_msgSend)(settings, setter, [value doubleValue]);
+    } else if (type[0] == 'B' || type[0] == 'c') {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(settings, setter, [value boolValue]);
+    }
+}
+
+static void LSRApplyIOS15TransitionBase(id t) {
+    NSDictionary *base = @{
+        @"blursPanel": @YES, @"blurRadius": @20.0, @"blurStart": @0.0, @"blurEnd": @0.4,
+        @"blurEndReducedTransparency": @0.275,
+        @"fadesContent": @YES, @"maxContentAlpha": @1.0, @"contentFadeStart": @0.2, @"contentFadeEnd": @0.7,
+        @"darkensContent": @YES, @"darkeningColorWhite": @0.0, @"darkeningColorAlpha": @0.2,
+        @"darkeningStart": @0.0, @"darkeningEnd": @0.5,
+        @"panelWallpaper": @NO, @"trackingWallpaper": @YES, @"trackingWallpaperParallaxFactor": @0.5,
+        @"revealWallpaper": @NO, @"fadePanelWallpaper": @NO, @"fadePanelWallpaperStart": @0.0,
+        @"fadePanelWallpaperEnd": @1.0, @"iconsFlyIn": @YES,
+        // iOS 16 only: iOS 15 never zoomed the wallpaper here.
+        @"scaleWallpaper": @NO,
+    };
+    [base enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
+        LSRSetTransitionValue(t, key, value);
+    }];
+}
+
+// Different wallpapers: the lock screen wallpaper travels with the sheet, fades and blurs.
+static void LSRApplyIOS15DifferentWallpaper(id t) {
+    NSDictionary *values = @{
+        @"blursPanel": @YES, @"panelWallpaper": @YES, @"trackingWallpaper": @YES,
+        @"trackingWallpaperParallaxFactor": @0.3, @"fadePanelWallpaper": @YES,
+        @"fadePanelWallpaperStart": @0.2, @"fadePanelWallpaperEnd": @1.0,
+        @"fadesContent": @YES, @"contentFadeStart": @0.2, @"contentFadeEnd": @0.7,
+    };
+    [values enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
+        LSRSetTransitionValue(t, key, value);
+    }];
+}
+
+static void LSRApplyIOS15Transitions(id settings) {
+    SEL sels[] = {
+        @selector(sameWallpaperInitialTransitionSettings), @selector(differentWallpaperInitialTransitionSettings),
+        @selector(sameWallpaperSubsequentTransitionSettings), @selector(differentWallpaperSubsequentTransitionSettings),
+        @selector(overAppTransitionSettings),
+    };
+    id t[5] = {nil};
+    for (int i = 0; i < 5; i++) {
+        if ([settings respondsToSelector:sels[i]]) t[i] = ((id (*)(id, SEL))objc_msgSend)(settings, sels[i]);
+        LSRApplyIOS15TransitionBase(t[i]);
+    }
+    LSRSetTransitionValue(settings, @"tension", @300.0);
+    LSRSetTransitionValue(settings, @"friction", @34.0);
+
+    // Same wallpaper, first swipe: no blur.
+    LSRSetTransitionValue(t[0], @"blursPanel", @NO);
+    // Different wallpapers, first swipe.
+    LSRApplyIOS15DifferentWallpaper(t[1]);
+    // Same wallpaper, later swipes.
+    LSRSetTransitionValue(t[2], @"blursPanel", @NO);
+    LSRSetTransitionValue(t[2], @"panelWallpaper", @YES);
+    // Different wallpapers later, and over an app (one shared block on iOS 15): the home
+    // wallpaper is revealed underneath, the icons don't fly in, the content doesn't fade.
+    for (int i = 3; i < 5; i++) {
+        LSRApplyIOS15DifferentWallpaper(t[i]);
+        LSRSetTransitionValue(t[i], @"revealWallpaper", @YES);
+        LSRSetTransitionValue(t[i], @"iconsFlyIn", @NO);
+        LSRSetTransitionValue(t[i], @"fadesContent", @NO);
+    }
+}
+
+%group LSRUnlock
+
+%hook CSCoverSheetTransitionsSettings
+- (void)setDefaultValues {
+    %orig;
+    LSRApplyIOS15Transitions(self);
+}
+
+%end
+
+%end // LSRUnlock
+
 #pragma mark - Settings
 
 // Missing file/key = never touched in Settings = on (the default).
@@ -1789,6 +1906,7 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     if (LSRPrefEnabled(prefs, @"focusEnabled")) %init(LSRFocus);
     if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);
     if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlatter);
+    if (LSRPrefEnabled(prefs, @"unlockAnimationEnabled") && NSClassFromString(@"CSCoverSheetTransitionsSettings")) %init(LSRUnlock);
     if (LSRPrefEnabled(prefs, @"liveWallpaperEnabled")) {
         sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
         sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);
