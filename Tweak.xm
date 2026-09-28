@@ -123,6 +123,7 @@ static const CGFloat kIOS15FaceIDStatusArea = 92.0;
 static const CGFloat kIOS15HomeButtonStatusArea = 68.0;
 static const CGFloat kIOS15TimeToDate = 36.0;
 static const CGFloat kIOS15FaceIDPadlockCenter = 76.0;
+static const CGFloat kIOS15DateBaselineToList = 29.0;
 
 // 0 = a screen iOS 15 didn't have (Dynamic Island): then 0.8x iOS 16's size.
 static CGFloat LSRIOS15ClockSize(CGFloat screenHeight) {
@@ -768,6 +769,18 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 %hook CSCombinedListViewController
 - (CGFloat)horizontalInsetMargin {
     return kIOS15ListInset;
+}
+
+// iOS 15 started the list (Focus pill, music player, notifications) 29pt below the date's
+// baseline (SBFDashBoardViewMetrics listMinYForPage: = date baseline + dateBaselineToListY);
+// iOS 16 starts it under its own, higher clock. The list view covers the whole screen, so its
+// top inset is the start's height on screen.
+- (UIEdgeInsets)_listViewDefaultContentInsets {
+    UIEdgeInsets insets = %orig;
+    if (!sLSRClockEnabled || [UIDevice currentDevice].userInterfaceIdiom != UIUserInterfaceIdiomPhone) return insets;
+    CGFloat listTop = round(LSRCurrentLayout().dateBaselineY + kIOS15DateBaselineToList);
+    if (insets.top < listTop) insets.top = listTop;
+    return insets;
 }
 %end
 
