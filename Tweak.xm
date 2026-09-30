@@ -375,17 +375,20 @@ static NSString *LSRIOS15DateTextForLabel(UILabel *label, NSString *incoming) {
     %orig(LSRIOS15DateTextForLabel(self, text));
 }
 
-// The time label gets iOS 16's font assigned directly (customTimeFont doesn't reach it).
+// The time and date labels get iOS 16's fonts assigned directly (customTimeFont doesn't reach them).
 - (void)setFont:(UIFont *)font {
     if ([self.superview isKindOfClass:NSClassFromString(@"CSProminentTimeView")]) font = LSRClockFont();
+    else if ([self.superview isKindOfClass:NSClassFromString(@"CSProminentSubtitleDateView")]) font = LSRDateFont();
     %orig(font);
 }
 
+// The attributed text carries its own font, which wins over the label's: give the date iOS 15's.
 - (void)setAttributedText:(NSAttributedString *)attributedText {
-    NSString *replacement = LSRIOS15DateTextForLabel(self, attributedText.string);
-    if (attributedText.length && ![replacement isEqualToString:attributedText.string]) {
-        NSDictionary *attributes = [attributedText attributesAtIndex:0 effectiveRange:NULL];
-        attributedText = [[NSAttributedString alloc] initWithString:replacement attributes:attributes];
+    if (attributedText.length && [self.superview isKindOfClass:NSClassFromString(@"CSProminentSubtitleDateView")]) {
+        NSMutableDictionary *attributes = [[attributedText attributesAtIndex:0 effectiveRange:NULL] mutableCopy];
+        attributes[NSFontAttributeName] = LSRDateFont();
+        attributedText = [[NSAttributedString alloc] initWithString:LSRIOS15DateTextForLabel(self, attributedText.string)
+            attributes:attributes];
     }
     %orig(attributedText);
 }
