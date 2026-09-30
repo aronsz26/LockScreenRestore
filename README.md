@@ -176,7 +176,8 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 | iPhone 12, 13, 14 | 390 × 844 pt | Should work (same screen as tested) |
 | iPhone X | 375 × 812 pt | ✅ Tested by a user (iOS 16.7) |
 | iPhone XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Should work (same screen as the iPhone X) |
-| iPhone XR, XS Max, 11, 11 Pro Max | 414 × 896 pt | Reported on iPhone XR: clock position fixed in 1.9 |
+| iPhone 11 | 414 × 896 pt | ✅ Tested by a user (iOS 16.1) |
+| iPhone XR, XS Max, 11 Pro Max | 414 × 896 pt | Should work (same screen as the iPhone 11); XR clock position fixed in 1.9 |
 | iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
 | iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Supported, untested (padlock least certain) |
 | iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported, untested (clock size fixed after a report on 8 Plus) |
