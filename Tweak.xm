@@ -654,9 +654,55 @@ static void LSRUpdateChargingShift(UIView *view) {
 
 
 @interface CSFocusActivityView : UIView
+- (UIView *)activityIndicator;
 @end
 
+@interface CSAdjunctItemView : UIView
+@end
+
+// The adjunct list starts 29pt below the date's baseline (kIOS15DateBaselineToList, right for the
+// music player), which puts the pill 39pt below it; iOS 15's was 19pt below (iPhone 7 on iOS 15.8,
+// iPhone 13 screenshots). Same on every iPhone, since the list start follows the date.
+static const CGFloat kIOS15FocusPillLift = 20.0;
+
+static UIView *LSRFocusIndicator(UIView *focusView) {
+    UIView *indicator = [focusView respondsToSelector:@selector(activityIndicator)] ? [(CSFocusActivityView *)focusView activityIndicator] : nil;
+    return [indicator isKindOfClass:[UIView class]] ? indicator : nil;
+}
+
 %group LSRFocus
+
+%hook CSFocusActivityView
+- (void)layoutSubviews {
+    %orig;
+    UIView *indicator = LSRFocusIndicator(self);
+    if (!indicator) return;
+    // %orig has just placed it; move it up and let it show outside the item.
+    indicator.center = CGPointMake(indicator.center.x, indicator.center.y - kIOS15FocusPillLift);
+    for (UIView *view = self; view && ![view isKindOfClass:[UIStackView class]]; view = view.superview) {
+        if (view.clipsToBounds) view.clipsToBounds = NO;
+    }
+}
+
+// Taps on the part of the pill above the item.
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    BOOL inside = %orig;
+    if (inside) return YES;
+    UIView *indicator = LSRFocusIndicator(self);
+    return indicator && CGRectContainsPoint(indicator.frame, point);
+}
+%end
+
+%hook CSAdjunctItemView
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    BOOL inside = %orig;
+    if (inside) return YES;
+    for (UIView *view in self.subviews) {
+        if ([view pointInside:[self convertPoint:point toView:view] withEvent:event]) return YES;
+    }
+    return NO;
+}
+%end
 
 %hook CSFocusActivityManager
 - (BOOL)_shouldHideFocusActivityIndicator {
