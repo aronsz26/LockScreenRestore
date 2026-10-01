@@ -107,6 +107,7 @@ static CGFloat sLSRClockSizeFactor = 1.0;
 // rounded to the nearest one, so the axis is set directly.
 static const CGFloat kIOS15ClockWeightAxis = 170.0;
 static const CGFloat kIOS15DateWeightAxis = 400.0;
+static const CGFloat kIOS15DateBaseFontSize = 22.0;
 static const uint32_t kFontAxisWeight = 'wght';
 static const CGFloat kIOS15TimeBaselineAboveDate = 0.441;
 static const CGFloat kSFDigitHeight = 0.717;
@@ -166,7 +167,7 @@ static LSRLayout LSRCurrentLayout(void) {
         BOOL faceID = phone && screenHeight >= 812.0;
         CGFloat iOS15Size = phone ? LSRIOS15ClockSize(screenHeight) : 0;
         layout.clockFontSize = round((iOS15Size > 0 ? iOS15Size : iOS16TimeSize * kIOS15ClockScale) * sLSRClockSizeFactor);
-        layout.dateFontSize = LSRClassMetric(@"SBFLockScreenMetrics", @"dateLabelFontSize", 20.0);
+        layout.dateFontSize = kIOS15DateBaseFontSize; // at the default text size; LSRDateFont() follows Text Size
         layout.padlockScale = 1.0 / LSRClassMetric(@"SBFLockScreenMetrics", @"proudLockScaleFactor", 0.5);
 
         CGFloat digitsTop, padlockCenter;
@@ -211,10 +212,35 @@ static UIFont *LSRClockFont(void) {
     return font;
 }
 
+// iOS 15's date follows Settings > Display & Brightness > Text Size: 22pt at the default size, scaled
+// like body text, up to Accessibility XXL (XL on 4" screens); the clock doesn't
+// (+[SBFLockScreenDateSubtitleView labelFont], still in iOS 16).
+static CGFloat LSRIOS15DateFontSize(void) {
+    CGSize screen = [UIScreen mainScreen].bounds.size;
+    UIContentSizeCategory maximum = MAX(screen.width, screen.height) > 568.0
+        ? UIContentSizeCategoryAccessibilityExtraExtraLarge : UIContentSizeCategoryAccessibilityExtraLarge;
+    Class subtitleClass = NSClassFromString(@"SBFLockScreenDateSubtitleView");
+    SEL scaled = NSSelectorFromString(@"scaledFontSize:withMaximumFontSizeCategory:");
+    if ([subtitleClass respondsToSelector:scaled]) {
+        CGFloat size = ((CGFloat (*)(id, SEL, CGFloat, NSString *))objc_msgSend)(subtitleClass, scaled, kIOS15DateBaseFontSize, maximum);
+        if (size > 0) return size;
+    }
+    UIContentSizeCategory category = UIApplication.sharedApplication.preferredContentSizeCategory;
+    if (UIContentSizeCategoryCompareToCategory(category, maximum) == NSOrderedDescending) category = maximum;
+    UITraitCollection *traits = [UITraitCollection traitCollectionWithPreferredContentSizeCategory:category];
+    return round([[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody] scaledValueForValue:kIOS15DateBaseFontSize
+        compatibleWithTraitCollection:traits] * 2.0) / 2.0;
+}
+
+// Rebuilt when Text Size changes.
 static UIFont *LSRDateFont(void) {
     static UIFont *font;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ font = LSRSystemFont(LSRCurrentLayout().dateFontSize, kIOS15DateWeightAxis); });
+    static UIContentSizeCategory fontCategory;
+    UIContentSizeCategory category = UIApplication.sharedApplication.preferredContentSizeCategory;
+    if (!font || ![category isEqualToString:fontCategory]) {
+        font = LSRSystemFont(LSRIOS15DateFontSize(), kIOS15DateWeightAxis);
+        fontCategory = category;
+    }
     return font;
 }
 
@@ -352,9 +378,12 @@ static NSDateFormatter *LSRLongDateFormatter(void) {
 
 // The view formats via its own _formatter ivar and writes the label directly, so we correct
 // the label itself. Only assign when different, so the resulting relayout finds nothing to do.
+static __weak CSProminentSubtitleDateView *sLSRDateView;
+
 static void LSRApplyIOS15Date(CSProminentSubtitleDateView *view) {
     UILabel *label = view.textLabel;
     if (!label) return;
+    sLSRDateView = view;
     NSString *wanted = [LSRLongDateFormatter() stringFromDate:view.date ?: [NSDate date]];
     if (![label.text isEqualToString:wanted]) label.text = wanted;
     UIFont *font = LSRDateFont();
@@ -2006,7 +2035,18 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     sLSRClockEnabled = LSRPrefEnabled(prefs, @"clockEnabled");
     id clockSize = prefs[@"clockSize"];
     if ([clockSize isKindOfClass:[NSNumber class]]) sLSRClockSizeFactor = MIN(MAX([clockSize doubleValue], 0.7), 1.5);
-    if (sLSRClockEnabled) %init(LSRClock);
+    if (sLSRClockEnabled) {
+        %init(LSRClock);
+        // Text Size changed in Settings: the date gets its new size right away.
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIContentSizeCategoryDidChangeNotification object:nil
+            queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+            CSProminentSubtitleDateView *view = sLSRDateView;
+            if (!view) return;
+            LSRApplyIOS15Date(view);
+            [view setNeedsLayout];
+            [view.superview setNeedsLayout];
+        }];
+    }
     if (LSRPrefEnabled(prefs, @"focusEnabled")) %init(LSRFocus);
     if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);
     if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlatter);
