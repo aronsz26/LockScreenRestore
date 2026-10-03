@@ -10,11 +10,11 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
 > **Feedback is very welcome:** if you try it on a different iPhone or iOS 16 version, please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot, even if everything looks right. That's how the [compatibility table](#compatibility) gets filled in.
 
 <p align="center">
-  <img src="screenshots/lockscreen.jpg" width="200" alt="Lock screen with the iOS 15 clock, padlock and Focus pill">
+  <img src="screenshots/lockscreen.png" width="200" alt="Lock screen with the iOS 15 clock, padlock and Focus pill">
   &nbsp;
-  <img src="screenshots/notifications.jpg" width="200" alt="iOS 15 notification cards listed under the clock">
+  <img src="screenshots/notifications.png" width="200" alt="iOS 15 notification cards listed under the clock">
   &nbsp;
-  <img src="screenshots/music.jpg" width="200" alt="iOS 15 music player with large artwork, app icon, AirPlay button and volume slider">
+  <img src="screenshots/music.png" width="200" alt="iOS 15 music player with large artwork, app icon, AirPlay button and volume slider">
   &nbsp;
   <img src="screenshots/settings.jpg" width="200" alt="LockScreenRestore settings with one switch per feature">
 </p>
@@ -48,7 +48,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 
 ### 🕘 iOS 15 Clock
 
-<img src="screenshots/lockscreen.jpg" width="180" align="right" alt="Lock screen">
+<img src="screenshots/lockscreen.png" width="180" align="right" alt="Lock screen">
 
 - Thin clock with the date **below** it, written out as "Sunday, September 27"
 - Plain white text instead of iOS 16's tinted, slightly see-through look
@@ -67,7 +67,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 
 ### 🔔 iOS 15 Notifications
 
-<img src="screenshots/notifications.jpg" width="180" align="right" alt="Notifications">
+<img src="screenshots/notifications.png" width="180" align="right" alt="Notifications">
 
 - Notifications are listed **right under the clock** instead of collected at the bottom
 - iOS 15 card shape: smaller rounded corners (13 pt instead of 23.5 pt), tighter padding, one-line cards 58 pt tall instead of 66 pt
@@ -78,7 +78,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 
 ### 🎵 iOS 15 Music Player
 
-<img src="screenshots/music.jpg" width="180" align="right" alt="Music player">
+<img src="screenshots/music.png" width="180" align="right" alt="Music player">
 
 - The iOS 15 layout: large artwork, device name above the title, **AirPlay** next to the title
 - Progress bar with a knob and the times below it
