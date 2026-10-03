@@ -24,7 +24,7 @@ details = [
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "Sizes and positions are calculated for every iPhone from iOS 15's own values. "
         "This is a **beta**: feedback and screenshots from other iPhones are very welcome on GitHub. "
-        "iPads aren't supported."},
+        "iPads aren't supported. **iPhones with a Dynamic Island (14 Pro and newer) aren't optimized yet**: you can install it there, but it may look off."},
     {"class": "DepictionSeparatorView"},
     {"class": "DepictionTableTextView", "title": "Compatibility", "text": "iOS 16 · rootless"},
     {"class": "DepictionTableTextView", "title": "Developer", "text": "aronsz26"},
@@ -32,6 +32,9 @@ details = [
     {"class": "DepictionTableButtonView", "title": "Report a problem", "action": "https://github.com/aronsz26/LockScreenRestore/issues", "openExternal": True},
 ]
 changelog = [
+    {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
+        "**1.9.4**\n- Music player: a tap on the artwork opens the playing app, like iOS 15\n- Date size follows Text Size like iOS 15\n"
+        "- Date keeps iOS 15's font (was too big on iPhone 8)\n- Focus pill sits 19 pt below the date like iOS 15 and can be tapped"},
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "**1.9.3**\n- Settings → Wallpaper stays open when you leave Settings and come back\n"
         "- Perspective Zoom moves the right way again\n- iPhone 8 Plus: clock size exactly like iOS 15"},

@@ -1,6 +1,6 @@
 Package: com.aronsz26.lockscreenrestore
 Name: LockScreenRestore
-Version: 1.9.4~beta2
+Version: 1.9.4
 Architecture: iphoneos-arm64
 Description: iOS 15 style lock screen on iOS 16: clock, date, padlock, Focus pill, notifications from the top, iOS 15 music player, unlock animation, live and dynamic wallpapers and the iOS 15 Settings > Wallpaper page with wallpaper downloads. Each part can be switched off in Settings. Beta.
 Maintainer: aronsz26

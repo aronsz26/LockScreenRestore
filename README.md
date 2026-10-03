@@ -5,6 +5,8 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
 > [!IMPORTANT]
 > **This is a beta.** So far it's been tested on an **iPhone 13 Pro (iOS 16.1.1)** and an **iPhone 12 Pro (iOS 16.5)**, both with Dopamine. Positions are calculated for every screen, but other screen sizes haven't been checked yet.
 >
+> **iPhones with Dynamic Island (iPhone 14 Pro, 14 Pro Max and newer) are not supported yet.** You can install it there, but nothing is optimized for the Dynamic Island, so expect things to look off.
+>
 > **Feedback is very welcome:** if you try it on a different iPhone or iOS 16 version, please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot, even if everything looks right. That's how the [compatibility table](#compatibility) gets filled in.
 
 <p align="center">
@@ -179,7 +181,7 @@ Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 
 | iPhone 11 | 414 × 896 pt | ✅ Tested by a user (iOS 16.1) |
 | iPhone XR, XS Max, 11 Pro Max | 414 × 896 pt | Should work (same screen as the iPhone 11); XR clock position fixed in 1.9 |
 | iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
-| iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Supported, untested (padlock least certain) |
+| iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Not supported yet: installable, but not optimized for the Dynamic Island |
 | iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported, untested (clock size fixed after a report on 8 Plus) |
 
 **Tested it on one of the untested iPhones?** Please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot of the lock screen, whether it looks right or not. Every report helps move a row to ✅.
@@ -202,6 +204,7 @@ The package needs **PreferenceLoader**; your package manager installs it automat
 
 ## Known limitations
 
+- **No Dynamic Island support yet:** on iPhones with a Dynamic Island (iPhone 14 Pro and newer) the tweak installs, but it isn't optimized for them.
 - **Beta:** only tested on one iPhone and one iOS version (see [Compatibility](#compatibility)).
 - Downloadable wallpapers depend on the [SniperGER/iOS-Wallpapers](https://github.com/SniperGER/iOS-Wallpapers) archive being online.
 - The home screen preview in Settings → Wallpaper is a small screenshot of your home screen, taken when you unlock to it. After changing the home screen wallpaper it shows the wallpaper without icons until you unlock again. The screenshot stays on your iPhone (`/var/mobile/Library/LockScreenRestore/HomePreview.jpg`).
@@ -253,7 +256,7 @@ The tweak works out every size and position each time SpringBoard starts, from v
 | Focus pill position | fixed ratios to the clock size and the date, measured on iOS 15 |
 | Charging battery | centered on the clock and date |
 
-On Touch ID iPhones (iPhone 8, 8 Plus, SE) and Dynamic Island iPhones (iPhone 14 Pro, 14 Pro Max), iOS draws the padlock differently, so the padlock part is the least certain there.
+On Touch ID iPhones (iPhone 8, 8 Plus, SE) iOS draws the padlock differently, so the padlock part is the least certain there. Dynamic Island iPhones are not optimized yet (see above).
 
 ## License
 
