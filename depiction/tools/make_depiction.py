@@ -6,7 +6,7 @@ shot = lambda n, t: {"url": f"{base}/screenshots/{n}", "accessibilityText": t}
 details = [
     {"class": "DepictionScreenshotsView", "itemCornerRadius": 14, "itemSize": "{160, 324}", "screenshots": [
         shot("lockscreen.png", "Lock screen"), shot("notifications.png", "Notifications"),
-        shot("music.png", "Music player"), shot("settings.jpg", "Settings")]},
+        shot("music.png", "Music player")]},
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "**The iOS 15 lock screen, back on iOS 16.** Thin clock with the date below it, the big padlock, "
         "notifications right under the clock, the iOS 15 music player, live and dynamic wallpapers and the "
