@@ -1008,6 +1008,7 @@ static NSString *LSRWindowDesignDir(void) {
     NSString *_loadedDir;
     NSURL *_videoURL;
     BOOL _wantsVideoVisible;
+    NSInteger _effectQuarter;
 }
 
 static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
@@ -1090,7 +1091,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _playerLayer.frame = _contentView.bounds;
     [CATransaction commit];
     _bokehView.frame = _contentView.bounds;
-    [self _updatePerspective:perspective];
+    [self _updatePerspective:perspective angle:angle];
 }
 
 // How far this view's x axis is turned against the screen as the user sees it (0 in portrait).
@@ -1113,19 +1114,31 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     });
 }
 
-- (void)_updatePerspective:(BOOL)on {
-    if (on == (_contentView.motionEffects.count > 0)) return;
+- (void)_updatePerspective:(BOOL)on angle:(CGFloat)angle {
+    // Same state: nothing to rebuild (the angle is a quarter turn, compare as an integer).
+    NSInteger quarter = (NSInteger)llround(angle / M_PI_2);
+    if (on == (_contentView.motionEffects.count > 0) && (!on || quarter == _effectQuarter)) return;
     for (UIMotionEffect *effect in [_contentView.motionEffects copy]) [_contentView removeMotionEffect:effect];
+    _effectQuarter = quarter;
     if (!on) return;
-    UIInterpolatingMotionEffect *x = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.x"
-        type:UIInterpolatingMotionEffectTypeTiltAlongHorizontalAxis];
+    // The tilt comes in screen directions, but the view's center moves in the window's, which
+    // is turned on screen by `angle`: offset = R(-angle) * (tilt along x, tilt along y).
+    CGFloat c = round(cos(angle)), sn = round(sin(angle));
+    // center.x gets  x * c + y * sn,  center.y gets  -x * sn + y * c.
     // Like iOS: the wallpaper moves against the tilt, so it seems to lie behind the screen.
-    x.minimumRelativeValue = @(kLSRPerspectiveMargin);
-    x.maximumRelativeValue = @(-kLSRPerspectiveMargin);
+    UIInterpolatingMotionEffectType horizontal = UIInterpolatingMotionEffectTypeTiltAlongHorizontalAxis;
+    UIInterpolatingMotionEffectType vertical = UIInterpolatingMotionEffectTypeTiltAlongVerticalAxis;
+    BOOL sideways = c == 0;
+    UIInterpolatingMotionEffect *x = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.x"
+        type:sideways ? vertical : horizontal];
     UIInterpolatingMotionEffect *y = [[UIInterpolatingMotionEffect alloc] initWithKeyPath:@"center.y"
-        type:UIInterpolatingMotionEffectTypeTiltAlongVerticalAxis];
-    y.minimumRelativeValue = @(kLSRPerspectiveMargin);
-    y.maximumRelativeValue = @(-kLSRPerspectiveMargin);
+        type:sideways ? horizontal : vertical];
+    CGFloat xSign = sideways ? sn : c;
+    CGFloat ySign = sideways ? -sn : c;
+    x.minimumRelativeValue = @( xSign * kLSRPerspectiveMargin);
+    x.maximumRelativeValue = @(-xSign * kLSRPerspectiveMargin);
+    y.minimumRelativeValue = @( ySign * kLSRPerspectiveMargin);
+    y.maximumRelativeValue = @(-ySign * kLSRPerspectiveMargin);
     UIMotionEffectGroup *group = [UIMotionEffectGroup new];
     group.motionEffects = @[x, y];
     [_contentView addMotionEffect:group];
