@@ -1041,12 +1041,16 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         [self addSubview:_dimView];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_reload)
                                                      name:kLSRWallpaperReloadNotification object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_orientationChanged)
+                                                     name:UIDeviceOrientationDidChangeNotification object:nil];
+        [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
         [self _loadCurrentVariant];
     }
     return self;
 }
 
 - (void)dealloc {
+    [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
     [_playerLayer removeObserver:self forKeyPath:@"readyForDisplay" context:kLSRReadyForDisplayContext];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -1070,15 +1074,43 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     [super layoutSubviews];
     BOOL perspective = sLSRPerspectiveZoom && !_bokehView;
     CGFloat margin = perspective ? kLSRPerspectiveMargin : 0.0;
+    // Landscape (iPhone Plus models): iOS keeps the wallpaper window portrait-sized and turns it
+    // with the interface, the way its own wallpaper view is a square that fits both. Counter-turn
+    // our content by however far the view is turned on screen, and give it the turned size.
+    CGFloat angle = [self _screenRotation];
+    BOOL sideways = fabs(sin(angle)) > 0.5;
+    CGSize size = sideways ? CGSizeMake(self.bounds.size.height, self.bounds.size.width) : self.bounds.size;
     // Set center/bounds, not frame: the motion effects offset the center.
-    _contentView.bounds = CGRectMake(0, 0, self.bounds.size.width + 2 * margin, self.bounds.size.height + 2 * margin);
+    _contentView.transform = CGAffineTransformIdentity;
+    _contentView.bounds = CGRectMake(0, 0, size.width + 2 * margin, size.height + 2 * margin);
     _contentView.center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
+    _contentView.transform = CGAffineTransformMakeRotation(-angle);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     _playerLayer.frame = _contentView.bounds;
     [CATransaction commit];
     _bokehView.frame = _contentView.bounds;
     [self _updatePerspective:perspective];
+}
+
+// How far this view's x axis is turned against the screen as the user sees it (0 in portrait).
+- (CGFloat)_screenRotation {
+    UIScreen *screen = self.window.screen;
+    if (!screen) return 0.0;
+    id<UICoordinateSpace> space = screen.coordinateSpace;
+    CGPoint origin = [self convertPoint:CGPointZero toCoordinateSpace:space];
+    CGPoint unitX = [self convertPoint:CGPointMake(1, 0) toCoordinateSpace:space];
+    CGFloat angle = atan2(unitX.y - origin.y, unitX.x - origin.x);
+    // Only quarter turns happen; snap away rounding noise.
+    return round(angle / M_PI_2) * M_PI_2;
+}
+
+- (void)_orientationChanged {
+    [self setNeedsLayout];
+    // The window may finish turning after the notification.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self setNeedsLayout];
+    });
 }
 
 - (void)_updatePerspective:(BOOL)on {
@@ -1207,7 +1239,11 @@ static void LSRCoverWithStill(UIView *effectView) {
     // blurred surfaces elsewhere, which must keep their look.
     if (![effectView.window isKindOfClass:NSClassFromString(@"SBCoverSheetWindow")]) return;
     CGSize screen = [UIScreen mainScreen].bounds.size;
-    if (fabs(effectView.bounds.size.width - screen.width) > 1 || fabs(effectView.bounds.size.height - screen.height) > 1) return;
+    // Full screen in either orientation.
+    CGSize have = effectView.bounds.size;
+    BOOL portraitSize = fabs(have.width - screen.width) <= 1 && fabs(have.height - screen.height) <= 1;
+    BOOL landscapeSize = fabs(have.width - screen.height) <= 1 && fabs(have.height - screen.width) <= 1;
+    if (!portraitSize && !landscapeSize) return;
 
     LSRStillCoverView *cover = nil;
     for (UIView *sub in effectView.subviews) {
