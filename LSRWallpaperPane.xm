@@ -58,6 +58,19 @@ static void LSRPaneNotifySpringBoard(void) {
 }
 
 // The chosen design's folder, or the first one available (same rule as the lock screen).
+// iPhones with a home button have a rectangular screen: iOS 15 drew their previews with square
+// corners and without the flashlight, camera and home bar.
+static BOOL LSRPaneScreenIsRounded(void) {
+    static BOOL rounded;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        UIScreen *screen = [UIScreen mainScreen];
+        SEL selector = NSSelectorFromString(@"_displayCornerRadius");
+        rounded = ![screen respondsToSelector:selector] || [[screen valueForKey:@"_displayCornerRadius"] doubleValue] > 0.0;
+    });
+    return rounded;
+}
+
 static NSString *LSRPaneDesignDir(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *chosen = LSRPanePrefs()[@"wallpaperDesign"];
@@ -167,7 +180,9 @@ static NSString *LSRPaneDesignDir(void) {
     CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
     // Proportions of the real 390 x 844 lock screen.
     CGFloat s = w / 390.0;
-    self.layer.cornerRadius = 40.0 * s + 4.0;
+    BOOL rounded = LSRPaneScreenIsRounded();
+    self.layer.cornerRadius = rounded ? 40.0 * s + 4.0 : 0.0;
+    self.flashlight.hidden = self.camera.hidden = self.homeBar.hidden = !rounded;
     self.imageView.frame = self.bounds;
     self.padlock.frame = CGRectMake((w - 20 * s) / 2, 62 * s, 20 * s, 26 * s);
     self.timeLabel.font = [UIFont systemFontOfSize:80 * s weight:UIFontWeightThin];
@@ -241,7 +256,7 @@ static NSString *LSRPaneDesignDir(void) {
     CGFloat y = round((self.contentView.bounds.size.height - h) / 2);
     self.lockPreview.frame = CGRectMake(x, y, w, h);
     self.homePreview.frame = CGRectMake(x + w + gap, y, w, h);
-    self.homePreview.layer.cornerRadius = 40.0 * (w / 390.0) + 4.0;
+    self.homePreview.layer.cornerRadius = LSRPaneScreenIsRounded() ? 40.0 * (w / 390.0) + 4.0 : 0.0;
 }
 
 @end
