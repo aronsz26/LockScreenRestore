@@ -20,13 +20,14 @@
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import "LSRSim.h"
 
 static NSString *LSRDebugPath(NSString *name) {
     static NSString *dir;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         BOOL springBoard = [[NSProcessInfo processInfo].processName isEqualToString:@"SpringBoard"];
-        dir = springBoard ? @"/var/mobile/Documents" : NSTemporaryDirectory();
+        dir = springBoard ? LSRDevicePath(@"/var/mobile/Documents") : NSTemporaryDirectory();
     });
     return [dir stringByAppendingPathComponent:name];
 }

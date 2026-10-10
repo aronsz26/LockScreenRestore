@@ -17,6 +17,7 @@
 #import <CoreText/CoreText.h>
 #import <AVFoundation/AVFoundation.h>
 #import "LSRBokeh.h"
+#import "LSRSim.h"
 
 // Read straight from disk: NSUserDefaults in SpringBoard's constructor didn't see the values
 // (cfprefsd). The settings page flushes to disk before its respring. Rootless jailbreaks
@@ -37,7 +38,7 @@ static void LSRDebugLog(NSString *format, ...) {
     va_end(args);
     // MediaRemoteUI is sandboxed: its log goes to its own tmp folder.
     BOOL springBoard = [[NSProcessInfo processInfo].processName isEqualToString:@"SpringBoard"];
-    NSString *path = [springBoard ? @"/var/mobile/Documents" : NSTemporaryDirectory()
+    NSString *path = [springBoard ? LSRDevicePath(@"/var/mobile/Documents") : NSTemporaryDirectory()
         stringByAppendingPathComponent:@"LockScreenRestoreDebug.log"];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
     if (!fh) {
@@ -941,7 +942,7 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 //
 // The files aren't bundled (they're Apple's): <kLSRWallpapersDir>/<Design>/{Light,Dark}.{heic,mov}
 
-static NSString *const kLSRWallpapersDir = @"/var/mobile/Library/LockScreenRestore/Wallpapers";
+#define kLSRWallpapersDir LSRDevicePath(@"/var/mobile/Library/LockScreenRestore/Wallpapers")
 static NSString *sLSRWallpaperDesignDir = nil;
 // Settings > Wallpaper "Set Home Screen"; nil = the home screen shows the lock screen's design.
 static NSString *sLSRHomeDesignDir = nil;
@@ -1449,7 +1450,7 @@ static NSString *LSRResolveWallpaperDesignDir(NSDictionary *prefs) {
 static NSDictionary *LSRReadPrefs(void) {
     NSDictionary *prefs = nil;
     for (size_t i = 0; i < sizeof(kLSRPrefsPaths) / sizeof(kLSRPrefsPaths[0]) && !prefs; i++) {
-        prefs = [NSDictionary dictionaryWithContentsOfFile:kLSRPrefsPaths[i]];
+        prefs = [NSDictionary dictionaryWithContentsOfFile:LSRDevicePath(kLSRPrefsPaths[i])];
     }
     return prefs;
 }
@@ -2120,7 +2121,7 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
 %ctor {
     NSDictionary *prefs = nil;
     for (size_t i = 0; i < sizeof(kLSRPrefsPaths) / sizeof(kLSRPrefsPaths[0]) && !prefs; i++) {
-        prefs = [NSDictionary dictionaryWithContentsOfFile:kLSRPrefsPaths[i]];
+        prefs = [NSDictionary dictionaryWithContentsOfFile:LSRDevicePath(kLSRPrefsPaths[i])];
     }
 
     // Also loaded into MediaRemoteUI, which draws the lock screen music player on iOS 16.
@@ -2172,7 +2173,7 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
             @"padlockScale %.2f\npadlockDrop %.2f\nscreen %@\n",
             l.clockFontSize, l.dateFontSize, l.timeBaselineY, l.dateBaselineY, l.padlockScale,
             l.padlockDrop, NSStringFromCGRect([UIScreen mainScreen].bounds)];
-        [summary writeToFile:@"/var/mobile/Documents/LockScreenRestoreLayout-now.log" atomically:YES
+        [summary writeToFile:LSRDevicePath(@"/var/mobile/Documents/LockScreenRestoreLayout-now.log") atomically:YES
                     encoding:NSUTF8StringEncoding error:nil];
     });
 #endif
