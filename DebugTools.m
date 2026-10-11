@@ -326,6 +326,44 @@ static void LSRSnapWindows(void) {
     }
 }
 
+// Backdrop layers: the wallpaper window's whole layer tree, and every backdrop layer elsewhere
+// with its group name -> LockScreenRestoreBackdrops-now.log
+static void LSRDumpLayerTree(CALayer *layer, NSUInteger depth, BOOL everything, NSMutableString *out) {
+    BOOL backdrop = [layer isKindOfClass:NSClassFromString(@"CABackdropLayer")];
+    if (everything || backdrop) {
+        NSMutableString *line = [NSMutableString string];
+        for (NSUInteger i = 0; i < (everything ? depth : 1); i++) [line appendString:@"  "];
+        [line appendFormat:@"%@ view=%@ frame=%@ hidden=%d opacity=%.2f", NSStringFromClass([layer class]),
+            layer.delegate ? NSStringFromClass([(id)layer.delegate class]) : @"-", NSStringFromCGRect(layer.frame),
+            layer.hidden, layer.opacity];
+        if (backdrop) {
+            [line appendFormat:@" GROUP=%@ namespace=%@ captureOnly=%@ scale=%@ enabled=%@", [layer valueForKey:@"groupName"],
+                [layer valueForKey:@"groupNamespace"], [layer valueForKey:@"captureOnly"], [layer valueForKey:@"scale"],
+                [layer valueForKey:@"enabled"]];
+            if (!everything) {
+                NSMutableArray *path = [NSMutableArray new];
+                for (CALayer *up = layer.superlayer; up; up = up.superlayer) {
+                    if (up.delegate) [path addObject:NSStringFromClass([(id)up.delegate class])];
+                }
+                [line appendFormat:@" < %@", [path componentsJoinedByString:@" < "]];
+            }
+        }
+        [out appendFormat:@"%@\n", line];
+    }
+    for (CALayer *sub in layer.sublayers) LSRDumpLayerTree(sub, depth + 1, everything, out);
+}
+
+static void LSRDumpBackdrops(void) {
+    NSMutableString *out = [NSMutableString string];
+    for (UIWindow *window in [UIWindow allWindowsIncludingInternalWindows:YES onlyVisibleWindows:NO]) {
+        BOOL wallpaper = [NSStringFromClass([window class]) containsString:@"Wallpaper"];
+        [out appendFormat:@"##### WINDOW %@ level=%.0f hidden=%d bounds=%@\n", NSStringFromClass([window class]),
+            window.windowLevel, window.hidden, NSStringFromCGRect(window.bounds)];
+        LSRDumpLayerTree(window.layer, 0, wallpaper, out);
+    }
+    [out writeToFile:LSRDebugPath(@"LockScreenRestoreBackdrops-now.log") atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
 __attribute__((constructor)) static void LSRInstallDebugTools(void) {
     [@"" writeToFile:LSRDebugPath(@"lsr-debug-here") atomically:YES encoding:NSUTF8StringEncoding error:nil];
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -346,6 +384,11 @@ __attribute__((constructor)) static void LSRInstallDebugTools(void) {
                     if (trimmed.length) [fragments addObject:trimmed];
                 }
                 if (fragments.count) LSRRunRecon(fragments);
+            }
+            NSString *backdropsRequest = LSRDebugPath(@"lsr-backdrops-request");
+            if ([fm fileExistsAtPath:backdropsRequest]) {
+                [fm removeItemAtPath:backdropsRequest error:nil];
+                LSRDumpBackdrops();
             }
             NSString *snapRequest = LSRDebugPath(@"lsr-snap-request");
             if ([fm fileExistsAtPath:snapRequest]) {

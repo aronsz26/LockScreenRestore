@@ -993,6 +993,95 @@ static NSString *LSRWindowDesignDir(void) {
     return !sLSRShowingLockScreen && sLSRHomeDesignDir ? sLSRHomeDesignDir : sLSRWallpaperDesignDir;
 }
 
+#pragma mark Test builds: layer report for landscape (issue #7)
+
+// Written once per orientation after SpringBoard starts: how the wallpaper window and the dock's
+// blur are layered, as class names and sizes only (no app names, no content). Lets a tester on
+// a device we don't have attach it to the issue. To be removed again before the release.
+@interface UIWindow (LSRAllWindows)
++ (NSArray *)allWindowsIncludingInternalWindows:(BOOL)includeInternal onlyVisibleWindows:(BOOL)onlyVisible;
+@end
+
+static NSString *LSRLayerOwner(CALayer *layer) {
+    return layer.delegate ? NSStringFromClass([(id)layer.delegate class]) : @"-";
+}
+
+static void LSRReportLayers(CALayer *layer, NSUInteger depth, BOOL everything, NSMutableString *out) {
+    BOOL backdrop = [layer isKindOfClass:NSClassFromString(@"CABackdropLayer")];
+    if (everything || backdrop) {
+        NSMutableString *line = [NSMutableString string];
+        for (NSUInteger i = 0; i < (everything ? depth : 1); i++) [line appendString:@"  "];
+        CGAffineTransform t = layer.affineTransform;
+        [line appendFormat:@"%@ view=%@ frame=%@ hidden=%d opacity=%.2f", NSStringFromClass([layer class]),
+            LSRLayerOwner(layer), NSStringFromCGRect(layer.frame), layer.hidden, layer.opacity];
+        if (!CGAffineTransformIsIdentity(t)) [line appendFormat:@" transform=[%.2f %.2f %.2f %.2f]", t.a, t.b, t.c, t.d];
+        if (backdrop) {
+            @try {
+                [line appendFormat:@" GROUP=%@ namespace=%@ captureOnly=%@ scale=%@ enabled=%@", [layer valueForKey:@"groupName"],
+                    [layer valueForKey:@"groupNamespace"], [layer valueForKey:@"captureOnly"], [layer valueForKey:@"scale"],
+                    [layer valueForKey:@"enabled"]];
+            } @catch (id e) {}
+            if (!everything) {
+                NSMutableArray *path = [NSMutableArray new];
+                for (CALayer *up = layer.superlayer; up; up = up.superlayer) {
+                    if (up.delegate) [path addObject:LSRLayerOwner(up)];
+                }
+                [line appendFormat:@" < %@", [path componentsJoinedByString:@" < "]];
+            }
+        }
+        [out appendFormat:@"%@\n", line];
+    }
+    for (CALayer *sub in layer.sublayers) LSRReportLayers(sub, depth + 1, everything, out);
+}
+
+// The dock with everything inside it except the icons.
+static void LSRReportDock(UIView *view, NSMutableString *out) {
+    if ([view isKindOfClass:NSClassFromString(@"SBDockView")]) {
+        [out appendFormat:@"--- dock, edge %@\n", [view valueForKey:@"dockEdge"]];
+        for (UIView *sub in view.subviews) {
+            if ([NSStringFromClass([sub class]) containsString:@"IconListView"]) continue;
+            [out appendFormat:@"  background color of %@: %@\n", NSStringFromClass([sub class]), sub.backgroundColor];
+            LSRReportLayers(sub.layer, 2, YES, out);
+        }
+        return;
+    }
+    for (UIView *sub in view.subviews) LSRReportDock(sub, out);
+}
+
+static void LSRWriteLayerReport(void) {
+    static BOOL wrotePortrait, wroteLandscape;
+    BOOL landscape = NO;
+    NSArray *windows = [UIWindow allWindowsIncludingInternalWindows:YES onlyVisibleWindows:NO];
+    for (UIWindow *window in windows) {
+        if ([window isKindOfClass:NSClassFromString(@"SBHomeScreenWindow")] && window.bounds.size.width > window.bounds.size.height) landscape = YES;
+    }
+    if (landscape ? wroteLandscape : wrotePortrait) return;
+    if (landscape) wroteLandscape = YES; else wrotePortrait = YES;
+
+    NSMutableString *out = [NSMutableString string];
+    [out appendFormat:@"LockScreenRestore layer report, %@\niOS %@, screen %@, scale %.0f\n\n", landscape ? @"landscape" : @"portrait",
+        [UIDevice currentDevice].systemVersion, NSStringFromCGRect([UIScreen mainScreen].bounds), [UIScreen mainScreen].scale];
+    for (UIWindow *window in windows) {
+        NSString *name = NSStringFromClass([window class]);
+        BOOL wallpaper = [name containsString:@"Wallpaper"];
+        BOOL home = [name isEqualToString:@"SBHomeScreenWindow"];
+        if (!wallpaper && !home) continue;
+        [out appendFormat:@"##### %@ level=%.0f hidden=%d bounds=%@\n", name, window.windowLevel, window.hidden,
+            NSStringFromCGRect(window.bounds)];
+        LSRReportLayers(window.layer, 0, wallpaper, out);
+        if (home) LSRReportDock(window, out);
+        [out appendString:@"\n"];
+    }
+    NSString *file = [NSString stringWithFormat:@"/var/mobile/Documents/LockScreenRestore-layers-%@.txt", landscape ? @"landscape" : @"portrait"];
+    [out writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+static void LSRScheduleLayerReport(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LSRWriteLayerReport();
+    });
+}
+
 @interface LSRLiveWallpaperView : UIView
 - (void)playVideo;
 - (void)stopVideo;
@@ -1046,6 +1135,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_orientationChanged)
                                                      name:UIDeviceOrientationDidChangeNotification object:nil];
         [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+        LSRScheduleLayerReport();
         [self _loadCurrentVariant];
     }
     return self;
@@ -1109,6 +1199,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
 
 - (void)_orientationChanged {
     [self setNeedsLayout];
+    LSRScheduleLayerReport();
     // The window may finish turning after the notification.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self setNeedsLayout];
