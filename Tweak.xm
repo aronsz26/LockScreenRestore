@@ -1137,6 +1137,11 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
         LSRScheduleLayerReport();
         [self _loadCurrentVariant];
+        // iOS may set up its wallpaper content (and the dock's capture in it) after us.
+        __weak LSRLiveWallpaperView *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [weakSelf.window setNeedsLayout];
+        });
     }
     return self;
 }
@@ -1199,6 +1204,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
 
 - (void)_orientationChanged {
     [self setNeedsLayout];
+    [self.window setNeedsLayout];
     LSRScheduleLayerReport();
     // The window may finish turning after the notification.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1427,6 +1433,72 @@ static void LSRCoverWithStill(UIView *effectView) {
 }
 @end
 
+// iPhones with a home button (the dock goes from edge to edge): the dock doesn't blur what is
+// behind it itself. iOS keeps a capture-only material inside its wallpaper content (group
+// "WallpaperCaptureGroup") and the dock shows what that one sees: iOS's own wallpaper, not ours
+// above it. A second copy of our wallpaper goes right under that capture, where only the capture
+// sees it (our real one covers it on screen).
+static __weak LSRLiveWallpaperView *sLSRCaptureCopy = nil;
+
+static UIView *LSRFindWallpaperCapture(UIView *view, NSUInteger depth) {
+    if ([view isKindOfClass:[LSRLiveWallpaperView class]]) return nil;
+    CALayer *layer = view.layer;
+    if ([layer isKindOfClass:NSClassFromString(@"CABackdropLayer")]) {
+        @try {
+            if ([[layer valueForKey:@"groupName"] isEqual:@"WallpaperCaptureGroup"] && [[layer valueForKey:@"captureOnly"] boolValue]) return view;
+        } @catch (id e) {}
+    }
+    if (depth == 0) return nil;
+    for (UIView *sub in view.subviews) {
+        UIView *found = LSRFindWallpaperCapture(sub, depth - 1);
+        if (found) return found;
+    }
+    return nil;
+}
+
+static void LSRPlaceCaptureCopy(UIWindow *window) {
+#ifdef DEBUG
+    // Test switches for iPhones whose dock blurs by itself (no capture there): "lsr-fake-capture"
+    // adds a capture like the one on home button iPhones, "lsr-no-capture-copy" leaves our copy out.
+    NSFileManager *fm = [NSFileManager defaultManager];
+    static __weak UIView *fakeCapture = nil;
+    UIView *content = window.subviews.firstObject;
+    if (!fakeCapture && content && ![content isKindOfClass:[LSRLiveWallpaperView class]]
+        && [fm fileExistsAtPath:@"/var/mobile/Documents/lsr-fake-capture"]) {
+        Class materialClass = NSClassFromString(@"MTMaterialView");
+        UIView *fake = ((id (*)(id, SEL, NSInteger, NSUInteger, double))objc_msgSend)(materialClass,
+            NSSelectorFromString(@"materialViewWithRecipe:options:initialWeighting:"), 19, 0, 1.0);
+        fake.frame = content.bounds;
+        fake.userInteractionEnabled = NO;
+        ((void (*)(id, SEL, id))objc_msgSend)(fake, NSSelectorFromString(@"setGroupName:"), @"WallpaperCaptureGroup");
+        [fake.layer setValue:@"global" forKey:@"groupNamespace"];
+        [fake.layer setValue:@YES forKey:@"captureOnly"];
+        [content addSubview:fake];
+        fakeCapture = fake;
+    }
+    if ([fm fileExistsAtPath:@"/var/mobile/Documents/lsr-no-capture-copy"]) return;
+#endif
+    UIView *capture = nil;
+    for (UIView *sub in window.subviews) {
+        if (!capture) capture = LSRFindWallpaperCapture(sub, 8);
+    }
+    UIView *host = capture.superview;
+    LSRLiveWallpaperView *copy = sLSRCaptureCopy;
+    if (!host) {
+        [copy removeFromSuperview];
+        return;
+    }
+    if (!copy) {
+        copy = [[LSRLiveWallpaperView alloc] initWithFrame:host.bounds];
+        sLSRCaptureCopy = copy;
+    }
+    NSUInteger captureIndex = [host.subviews indexOfObject:capture];
+    if (copy.superview != host || captureIndex == 0 || host.subviews[captureIndex - 1] != copy) {
+        [host insertSubview:copy belowSubview:capture];
+    }
+    if (!CGRectEqualToRect(copy.frame, host.bounds)) copy.frame = host.bounds;
+}
+
 %group LSRWallpaper
 
 %hook _SBWallpaperSecureWindow
@@ -1445,6 +1517,7 @@ static void LSRCoverWithStill(UIView *effectView) {
         [self insertSubview:view aboveSubview:wallpaperContent];
     }
     if (!CGRectEqualToRect(view.frame, self.bounds)) view.frame = self.bounds;
+    LSRPlaceCaptureCopy(self);
 }
 %end
 
