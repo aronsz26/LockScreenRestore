@@ -668,6 +668,8 @@ static CGFloat LSRCollectionsGap(void) {
 - (instancetype)initWithImage:(UIImage *)image name:(NSString *)name video:(AVURLAsset *)video time:(double)time;
 - (instancetype)initWithImage:(UIImage *)image video:(AVURLAsset *)video variant:(NSInteger)variant options:(id)options
       disableSegmentedControl:(BOOL)disableSegmentedControl enableButtons:(BOOL)enableButtons disableContents:(BOOL)disableContents;
+- (instancetype)initWithProceduralWallpaper:(NSDictionary *)wallpaper options:(NSDictionary *)options variant:(NSInteger)variant
+      disableSegmentedControl:(BOOL)disableSegmentedControl enableButtons:(BOOL)enableButtons disableContents:(BOOL)disableContents;
 - (void)setImageWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion;
 - (void)setWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion;
 @end
@@ -1351,13 +1353,25 @@ static void LSRRemoteThumbnail(LSRRemoteDesign *design, void (^completion)(UIIma
     });
 }
 
-// A still or live design opens in iOS's own legacy preview (SBSUIWallpaperPreviewViewController,
-// iOS 15's "Set" screen with its Perspective Zoom and Live Photo buttons); a Dynamic one, or
-// any design on an iOS without that class, in ours.
+// A design opens in iOS's own legacy preview (SBSUIWallpaperPreviewViewController, iOS 15's
+// "Set" screen with its Perspective Zoom and Live Photo buttons), or in ours on an iOS without
+// that class.
 - (UIViewController *)_applePreviewFor:(NSString *)design {
-    if (LSRIsBokehDesign(design)) return nil;
     Class previewClass = NSClassFromString(@"SBSUIWallpaperPreviewViewController");
     BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    if (LSRIsBokehDesign(design)) {
+        // Dynamic: the preview draws the preset with iOS 15's bokeh view itself.
+        NSString *variant = LSRLegacyBokehVariant(design, dark);
+        SEL init = @selector(initWithProceduralWallpaper:options:variant:disableSegmentedControl:enableButtons:disableContents:);
+        if (!variant || !LSRProceduralWallpapersBundle() || ![previewClass instancesRespondToSelector:init]) return nil;
+        SBSUIWallpaperPreviewViewController *preview = [[previewClass alloc]
+            initWithProceduralWallpaper:@{ @"kSBUIMagicWallpaperIdentifierKey": @"Bokeh" } options:@{ @"bokehVariant": variant }
+            variant:0 disableSegmentedControl:NO enableButtons:YES disableContents:NO];
+        preview.previewDelegate = self;
+        preview.modalPresentationStyle = UIModalPresentationFullScreen;
+        objc_setAssociatedObject(preview, kLSRPreviewDesignKey, design, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        return preview;
+    }
     NSString *base = [[kLSRPaneWallpapersDir stringByAppendingPathComponent:design] stringByAppendingPathComponent:dark ? @"Dark" : @"Light"];
     UIImage *image = [UIImage imageWithContentsOfFile:[base stringByAppendingPathExtension:@"heic"]];
     if (!image || ![previewClass instancesRespondToSelector:@selector(initWithImage:video:variant:options:disableSegmentedControl:enableButtons:disableContents:)]) return nil;
@@ -1562,8 +1576,9 @@ static UIImage *LSRFramedPreviewImage(SBSUIWallpaperPreviewViewController *contr
     // Both screens are ours now (iOS 16 ignores this path for the home screen anyway).
     NSString *design = objc_getAssociatedObject(self, kLSRPreviewDesignKey);
     if (design) {
-        // One of our designs: set it by name, with the preview's Perspective Zoom choice.
-        LSRPaneSetPref(@"perspectiveZoom", @(self.motionEnabled));
+        // One of our designs: set it by name, with the preview's Perspective Zoom choice
+        // (a Dynamic design has none).
+        if (!LSRIsBokehDesign(design)) LSRPaneSetPref(@"perspectiveZoom", @(self.motionEnabled));
         LSRApplyWallpaper(design, nil, nil, locations);
     } else {
         LSRApplyWallpaper(nil, LSRFramedPreviewImage(self), LSRPreviewVideoURL(self), locations);
