@@ -88,9 +88,47 @@ static inline UIView *LSRBokehView(NSString *dir, BOOL dark, CGRect frame) {
     return view;
 }
 
+// iOS 15's own bokeh view. iOS 16 still has it, renamed (SBFBokehWallpaperView ->
+// PBUIBokehWallpaperView, the way iPadOS 16 draws Dynamic wallpapers), and the presets it takes
+// are unchanged: +[Bokeh presetWallpaperOptions] in ProceduralWallpapers.bundle lists the same
+// 14 on 15.8 and 16.1 ("newblue", ..., "BokehGradient"). It picks light or dark colors itself.
+static inline NSString *LSRLegacyBokehVariant(NSString *dir) {
+    static NSDictionary *variants;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        variants = @{ @"Multicolored": @"newmixedcolors", @"Green": @"newgreen", @"Yellow": @"newyellow",
+                      @"Orange": @"neworange", @"Red": @"newred", @"Purple": @"newpurple", @"Blue": @"newblue",
+                      @"Warm_Silver": @"BokehGradient", @"Cool_Silver": @"BokehGradientSilver" };
+    });
+    NSString *folder = dir.lastPathComponent.stringByDeletingPathExtension;
+    NSRange dot = [folder rangeOfString:@"."];
+    return variants[dot.location == NSNotFound ? folder : [folder substringFromIndex:NSMaxRange(dot)]];
+}
+
+static inline UIView *LSRLegacyBokehViewForVariant(NSString *variant, CGRect frame) {
+    if (!variant.length) return nil;
+    dlopen("/System/Library/PrivateFrameworks/PaperBoardUI.framework/PaperBoardUI", RTLD_NOW);
+    [[NSBundle bundleWithPath:@"/System/Library/ProceduralWallpaper/ProceduralWallpapers.bundle"] load];
+    Class configurationClass = NSClassFromString(@"PBUIWallpaperConfiguration");
+    Class viewClass = NSClassFromString(@"PBUIBokehWallpaperView");
+    SEL configurationInit = NSSelectorFromString(@"initWithVariant:type:");
+    SEL viewInit = NSSelectorFromString(@"initWithFrame:configuration:variant:cacheGroup:delegate:options:");
+    if (![configurationClass instancesRespondToSelector:configurationInit] || ![viewClass instancesRespondToSelector:viewInit]) return nil;
+    // Variant 0 is the lock screen, wallpaper type 2 a procedural ("magic") wallpaper.
+    id configuration = ((id (*)(id, SEL, long long, long long))objc_msgSend)([configurationClass alloc], configurationInit, 0, 2);
+    ((void (*)(id, SEL, id))objc_msgSend)(configuration, NSSelectorFromString(@"setProceduralWallpaperInfo:"), @{
+        @"kSBUIMagicWallpaperIdentifierKey": @"Bokeh",
+        @"kSBUIMagicWallpaperPresetOptionsKey": @{ @"bokehVariant": variant },
+    });
+    return ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
+        [viewClass alloc], viewInit, frame, configuration, 0, @"LockScreenRestore", nil, 0);
+}
+
 static inline void LSRSetBokehAnimating(UIView *view, BOOL animating) {
     if ([view respondsToSelector:@selector(setAnimationEnabled:)]) {
         ((void (*)(id, SEL, BOOL))objc_msgSend)(view, @selector(setAnimationEnabled:), animating);
+    } else if ([view respondsToSelector:@selector(setWallpaperAnimationEnabled:)]) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(view, @selector(setWallpaperAnimationEnabled:), animating);
     }
 }
 

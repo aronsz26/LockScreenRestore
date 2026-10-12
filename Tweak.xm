@@ -1342,7 +1342,16 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _bokehView = nil;
     if (LSRIsBokehDesign(dir)) {
         // Dynamic: Apple's animated bokeh, no video.
-        _bokehView = LSRBokehView(dir, [variant isEqualToString:@"Dark"], _contentView.bounds);
+        // Test switch: "lsr-legacy-bokeh" draws the design with iOS 15's own bokeh view instead
+        // (a variant name in the file picks another preset).
+        NSString *legacySwitch = @"/var/mobile/Documents/lsr-legacy-bokeh";
+        if ([[NSFileManager defaultManager] fileExistsAtPath:legacySwitch]) {
+            NSString *wanted = [[NSString stringWithContentsOfFile:legacySwitch encoding:NSUTF8StringEncoding error:nil]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            _bokehView = LSRLegacyBokehViewForVariant(wanted.length ? wanted : LSRLegacyBokehVariant(dir), _contentView.bounds);
+            LSRDebugLog(@"legacy bokeh %@ -> %@", wanted.length ? wanted : LSRLegacyBokehVariant(dir), _bokehView);
+        }
+        if (!_bokehView) _bokehView = LSRBokehView(dir, [variant isEqualToString:@"Dark"], _contentView.bounds);
         if (_bokehView) [_contentView insertSubview:_bokehView aboveSubview:_imageView];
         LSRSetBokehAnimating(_bokehView, YES);
         _imageView.image = _bokehView ? nil : LSRWallpaperStillIn(dir, variant);
