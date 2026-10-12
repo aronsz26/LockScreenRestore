@@ -15,6 +15,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <CoreText/CoreText.h>
+#import <dlfcn.h>
 #import <AVFoundation/AVFoundation.h>
 #import "LSRBokeh.h"
 #import "LSRSim.h"
@@ -103,10 +104,17 @@ static const CGFloat kIOS15ClockScale = 0.8;
 // Settings > Clock Size (1 = iOS 15's size), for anyone who wants it bigger or smaller.
 static CGFloat sLSRClockSizeFactor = 1.0;
 // Weights on the system font's weight axis (Thin 111, Light 274, Regular 400, Medium 510).
-// Clock: Thin looked slightly too thin, 220 and 250 too thick, 170 matched. Date: Regular (170
-// looked too thin, Medium too heavy). UIFontWeight values between the named weights get
-// rounded to the nearest one, so the axis is set directly.
+// Clock: only the fallback when iOS 15's own font can't be built (see LSRIOS15ClockFont); Thin
+// looked slightly too thin, 220 and 250 too thick, 170 matched. Date: Regular (170 looked too
+// thin, Medium too heavy). UIFontWeight values between the named weights get rounded to the
+// nearest one, so the axis is set directly.
 static const CGFloat kIOS15ClockWeightAxis = 170.0;
+// +[SBFLockScreenDateView timeFont] on iOS 15.0-15.8: CTFontCreateUIFontForLanguage(140, size)
+// (".AppleSystemUIFontThinAlways") copied with the traits grade 2 and design "Soft". The same
+// calls give the same glyphs and advances on iOS 16; the weight-axis font has the same strokes
+// but a 3pt narrower colon and up to 1pt wider digits at 80pt.
+static const uint32_t kIOS15ClockUIFontType = 140;
+static const NSInteger kIOS15ClockGrade = 2;
 static const CGFloat kIOS15DateWeightAxis = 400.0;
 static const CGFloat kIOS15DateBaseFontSize = 22.0;
 static const uint32_t kFontAxisWeight = 'wght';
@@ -205,11 +213,32 @@ static UIFont *LSRSystemFont(CGFloat size, CGFloat weightAxis) {
     return [UIFont fontWithDescriptor:descriptor size:size];
 }
 
+static UIFont *LSRIOS15ClockFont(CGFloat size) {
+    CFStringRef *gradeTrait = (CFStringRef *)dlsym(RTLD_DEFAULT, "kCTFontGradeTrait");
+    CFStringRef *designTrait = (CFStringRef *)dlsym(RTLD_DEFAULT, "kCTFontUIFontDesignTrait");
+    CFStringRef *designSoft = (CFStringRef *)dlsym(RTLD_DEFAULT, "kCTFontUIFontDesignSoft");
+    if (!gradeTrait || !designTrait || !designSoft) return nil;
+    CTFontRef base = CTFontCreateUIFontForLanguage((CTFontUIFontType)kIOS15ClockUIFontType, size, NULL);
+    if (!base) return nil;
+    NSDictionary *attributes = @{ (__bridge NSString *)kCTFontTraitsAttribute: @{
+        (__bridge NSString *)*gradeTrait: @(kIOS15ClockGrade),
+        (__bridge NSString *)*designTrait: (__bridge NSString *)*designSoft,
+    } };
+    CTFontDescriptorRef descriptor = CTFontDescriptorCreateWithAttributes((__bridge CFDictionaryRef)attributes);
+    CTFontRef font = CTFontCreateCopyWithAttributes(base, 0.0, NULL, descriptor);
+    CFRelease(descriptor);
+    CFRelease(base);
+    return (__bridge_transfer UIFont *)font;
+}
+
 // Cached: compared with isEqual: on every layout pass, and building them isn't free.
 static UIFont *LSRClockFont(void) {
     static UIFont *font;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ font = LSRSystemFont(LSRCurrentLayout().clockFontSize, kIOS15ClockWeightAxis); });
+    dispatch_once(&once, ^{
+        CGFloat size = LSRCurrentLayout().clockFontSize;
+        font = LSRIOS15ClockFont(size) ?: LSRSystemFont(size, kIOS15ClockWeightAxis);
+    });
     return font;
 }
 
