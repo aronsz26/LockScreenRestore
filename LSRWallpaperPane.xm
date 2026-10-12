@@ -1573,14 +1573,31 @@ static UIImage *LSRFramedPreviewImage(SBSUIWallpaperPreviewViewController *contr
 }
 
 %hook SBSUIWallpaperPreviewViewController
-// A Dynamic design: the preview only shows the gradient until its bokeh view is told to
-// animate (in SpringBoard the wallpaper controller did that).
+// A Dynamic design: the bokeh view builds its bubbles when it's created, each transparent with
+// a fade, flicker and scale animation, and the preview only puts the view on screen afterwards.
+// By then those animations are gone (only the movement is left) and the bubbles stay invisible.
+// Build them again now that the view is on screen.
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     if (!LSRIsBokehDesign(objc_getAssociatedObject(self, kLSRPreviewDesignKey))) return;
     UIView *wallpaper = [self respondsToSelector:@selector(_wallpaperView)] ? [self _wallpaperView] : nil;
     UIView *bokeh = [wallpaper isKindOfClass:NSClassFromString(@"PBUIBokehWallpaperView")] ? wallpaper
         : LSRPaneFindSubview(self.view, NSClassFromString(@"PBUIBokehWallpaperView"));
+    SEL addCircles = NSSelectorFromString(@"_addBokehCircles:inBounds:");
+    Class circleClass = NSClassFromString(@"PBUIBokehWallpaperCircle");
+    NSMutableArray *circles = nil;
+    @try {
+        circles = [bokeh valueForKey:@"_circleArray"];
+    } @catch (NSException *e) {
+        circles = nil;
+    }
+    if (!bokeh.window || !circleClass || ![circles isKindOfClass:[NSMutableArray class]] || ![bokeh respondsToSelector:addCircles]) return;
+    NSInteger count = circles.count;
+    for (CALayer *layer in [bokeh.layer.sublayers copy]) {
+        if ([layer isKindOfClass:circleClass]) [layer removeFromSuperlayer];
+    }
+    [circles removeAllObjects];
+    ((void (*)(id, SEL, NSInteger, CGRect))objc_msgSend)(bokeh, addCircles, count, bokeh.bounds);
     LSRSetBokehAnimating(bokeh, YES);
 }
 
