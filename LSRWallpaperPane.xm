@@ -633,9 +633,17 @@ static CGFloat LSRCollectionsGap(void) {
 #pragma mark - Settings: preview and set
 
 @interface SBSUIWallpaperPreviewViewController : UIViewController
+@property (nonatomic, weak) id previewDelegate;
+@property (nonatomic) BOOL motionEnabled;
 - (instancetype)initWithImage:(UIImage *)image;
+- (instancetype)initWithImage:(UIImage *)image name:(NSString *)name;
+- (instancetype)initWithImage:(UIImage *)image name:(NSString *)name video:(AVURLAsset *)video time:(double)time;
 - (void)setImageWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion;
+- (void)setWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion;
 @end
+
+// The design a legacy preview was opened for (nil for a photo from an album).
+static const void *const kLSRPreviewDesignKey = &kLSRPreviewDesignKey;
 
 typedef NS_OPTIONS(NSInteger, LSRWallpaperLocations) {
     LSRWallpaperLocationLockScreen = 1,
@@ -1313,7 +1321,61 @@ static void LSRRemoteThumbnail(LSRRemoteDesign *design, void (^completion)(UIIma
     });
 }
 
+// Test switch: "lsr-apple-preview" opens a still or live design in iOS's own legacy preview
+// (SBSUIWallpaperPreviewViewController, iOS 15's "Set" screen with its Perspective Zoom and
+// Live Photo buttons) instead of ours.
+- (UIViewController *)_applePreviewFor:(NSString *)design {
+    if (LSRIsBokehDesign(design) || ![[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-apple-preview"]) return nil;
+    Class previewClass = NSClassFromString(@"SBSUIWallpaperPreviewViewController");
+    BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    NSString *base = [[kLSRPaneWallpapersDir stringByAppendingPathComponent:design] stringByAppendingPathComponent:dark ? @"Dark" : @"Light"];
+    UIImage *image = [UIImage imageWithContentsOfFile:[base stringByAppendingPathExtension:@"heic"]];
+    if (!image || ![previewClass instancesRespondToSelector:@selector(initWithImage:name:video:time:)]) return nil;
+    NSString *videoPath = [base stringByAppendingPathExtension:@"mov"];
+    BOOL live = _kind == LSRWallpaperKindLive && [[NSFileManager defaultManager] fileExistsAtPath:videoPath];
+    // The still is the video's first frame.
+    SBSUIWallpaperPreviewViewController *preview = live
+        ? [[previewClass alloc] initWithImage:image name:design video:[AVURLAsset assetWithURL:[NSURL fileURLWithPath:videoPath]] time:0.0]
+        : [[previewClass alloc] initWithImage:image name:design];
+    preview.previewDelegate = self;
+    preview.modalPresentationStyle = UIModalPresentationFullScreen;
+    objc_setAssociatedObject(preview, kLSRPreviewDesignKey, design, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    return preview;
+}
+
+- (void)wallpaperPreviewViewControllerCancelButtonPressed:(UIViewController *)preview {
+    [preview dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)wallpaperPreviewViewControllerSetButtonPressed:(SBSUIWallpaperPreviewViewController *)preview {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:nil message:nil
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak SBSUIWallpaperPreviewViewController *weakPreview = preview;
+    void (^set)(NSInteger) = ^(NSInteger locations) {
+        [weakPreview setWallpaperForLocations:locations completionHandler:^{
+            dispatch_async(dispatch_get_main_queue(), ^{ [weakPreview dismissViewControllerAnimated:YES completion:nil]; });
+        }];
+    };
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Set Lock Screen" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        set(LSRWallpaperLocationLockScreen);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Set Home Screen" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        set(LSRWallpaperLocationHomeScreen);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Set Both" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        set(LSRWallpaperLocationLockScreen | LSRWallpaperLocationHomeScreen);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = preview.view;
+    [preview presentViewController:sheet animated:YES completion:nil];
+}
+
 - (void)_preview:(NSString *)design {
+    UIViewController *apple = [self _applePreviewFor:design];
+    if (apple) {
+        [self presentViewController:apple animated:YES completion:nil];
+        return;
+    }
     LSRWallpaperPreviewController *preview = [[LSRWallpaperPreviewController alloc]
         initWithDesign:design live:_kind == LSRWallpaperKindLive];
     [self presentViewController:preview animated:YES completion:nil];
@@ -1467,7 +1529,14 @@ static UIImage *LSRFramedPreviewImage(SBSUIWallpaperPreviewViewController *contr
 %hook SBSUIWallpaperPreviewViewController
 - (void)setWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion {
     // Both screens are ours now (iOS 16 ignores this path for the home screen anyway).
-    LSRApplyWallpaper(nil, LSRFramedPreviewImage(self), LSRPreviewVideoURL(self), locations);
+    NSString *design = objc_getAssociatedObject(self, kLSRPreviewDesignKey);
+    if (design) {
+        // One of our designs: set it by name, with the preview's Perspective Zoom choice.
+        LSRPaneSetPref(@"perspectiveZoom", @(self.motionEnabled));
+        LSRApplyWallpaper(design, nil, nil, locations);
+    } else {
+        LSRApplyWallpaper(nil, LSRFramedPreviewImage(self), LSRPreviewVideoURL(self), locations);
+    }
     if (completion) completion();
 }
 %end
