@@ -3,8 +3,6 @@
 Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player, unlock animation, live and dynamic wallpapers and the old **Settings → Wallpaper** page.
 
 > [!IMPORTANT]
-> **This is a beta.** So far it's been tested on an **iPhone 13 Pro (iOS 16.1.1)** and an **iPhone 12 Pro (iOS 16.5)**, both with Dopamine. Positions are calculated for every screen, but other screen sizes haven't been checked yet.
->
 > **iPhones with Dynamic Island (iPhone 14 Pro, 14 Pro Max and newer) are not supported yet.** You can install it there, but nothing is optimized for the Dynamic Island, so expect things to look off.
 >
 > **Feedback is very welcome:** if you try it on a different iPhone or iOS 16 version, please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot, even if everything looks right. That's how the [compatibility table](#compatibility) gets filled in.
