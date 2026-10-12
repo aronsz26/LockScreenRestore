@@ -1157,6 +1157,77 @@ static void LSRScheduleLayerReport(void) {
     });
 }
 
+// iOS 15's own wallpaper view for a still. iOS 16 still has it, renamed (SBFStaticWallpaperView
+// -> PBUIStaticWallpaperView): it shows the image at its own size, centered, and moves it with
+// the device for Perspective Zoom (its parallax, with Apple's settings).
+//
+// iOS 15 stored a wallpaper already cut to the size it needs: the screen plus an overhang at
+// each side for Perspective Zoom (+[PBUIWallpaperParallaxSettings minimumWallpaperSizeForCurrentDevice],
+// 26 x 64pt on a 390 x 844pt screen), or just the screen without it. Same here: the design's
+// still, filled into that size.
+static CGSize LSRAppleWallpaperSize(BOOL perspective) {
+    CGSize screen = [UIScreen mainScreen].bounds.size;
+    CGSize size = CGSizeMake(MIN(screen.width, screen.height), MAX(screen.width, screen.height));
+    if (!perspective) return size;
+    dlopen("/System/Library/PrivateFrameworks/PaperBoardUI.framework/PaperBoardUI", RTLD_NOW);
+    Class settings = NSClassFromString(@"PBUIWallpaperParallaxSettings");
+    SEL minimum = NSSelectorFromString(@"minimumWallpaperSizeForCurrentDevice");
+    if (![settings respondsToSelector:minimum]) return size;
+    CGSize wanted = ((CGSize (*)(id, SEL))objc_msgSend)(settings, minimum);
+    return wanted.width >= size.width && wanted.height >= size.height ? wanted : size;
+}
+
+static UIImage *LSRAppleSizedStill(UIImage *still, BOOL perspective) {
+    if (!still || still.size.width <= 0 || still.size.height <= 0) return nil;
+    static NSCache *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSCache new]; cache.countLimit = 4; });
+    NSString *key = [NSString stringWithFormat:@"%p|%d", still, perspective];
+    UIImage *sized = [cache objectForKey:key];
+    if (sized) return sized;
+    CGSize size = LSRAppleWallpaperSize(perspective);
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+    format.opaque = YES;
+    sized = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        CGFloat scale = MAX(size.width / still.size.width, size.height / still.size.height);
+        CGSize drawn = CGSizeMake(still.size.width * scale, still.size.height * scale);
+        [still drawInRect:CGRectMake((size.width - drawn.width) / 2, (size.height - drawn.height) / 2, drawn.width, drawn.height)];
+    }];
+    if (sized) [cache setObject:sized forKey:key];
+    return sized;
+}
+
+static UIView *LSRLegacyStaticView(UIImage *still, NSString *name, CGRect frame, BOOL perspective) {
+    // Test switch: back to our own image view.
+    if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-no-legacy-static"]) return nil;
+    UIImage *sized = LSRAppleSizedStill(still, perspective);
+    if (!sized.CGImage) return nil;
+    Class imageClass = NSClassFromString(@"PBUIWallpaperImage");
+    Class optionsClass = NSClassFromString(@"PBUIWallpaperOptions");
+    Class configurationClass = NSClassFromString(@"PBUIWallpaperConfiguration");
+    Class viewClass = NSClassFromString(@"PBUIStaticWallpaperView");
+    SEL imageInit = NSSelectorFromString(@"initWithCGImage:scale:orientation:wallpaperFileURL:");
+    SEL optionsMake = NSSelectorFromString(@"optionsWithName:parallaxFactor:zoomScale:supportsCropping:cropRect:portrait:");
+    SEL viewInit = NSSelectorFromString(@"initWithFrame:configuration:variant:cacheGroup:delegate:options:");
+    if (![imageClass instancesRespondToSelector:imageInit] || ![optionsClass respondsToSelector:optionsMake]
+        || ![configurationClass instancesRespondToSelector:NSSelectorFromString(@"initWithVariant:type:")]
+        || ![viewClass instancesRespondToSelector:viewInit]) return nil;
+    id image = ((id (*)(id, SEL, CGImageRef, CGFloat, NSInteger, id))objc_msgSend)(
+        [imageClass alloc], imageInit, sized.CGImage, sized.scale, UIImageOrientationUp, nil);
+    id options = ((id (*)(id, SEL, id, double, double, BOOL, CGRect, BOOL))objc_msgSend)(
+        optionsClass, optionsMake, name ?: @"LockScreenRestore", perspective ? 1.0 : 0.0, 1.0, NO, CGRectZero, YES);
+    // Variant 0 is the lock screen, wallpaper type 1 a still image.
+    id configuration = ((id (*)(id, SEL, long long, long long))objc_msgSend)(
+        [configurationClass alloc], NSSelectorFromString(@"initWithVariant:type:"), 0, 1);
+    ((void (*)(id, SEL, id))objc_msgSend)(configuration, NSSelectorFromString(@"setWallpaperImage:"), image);
+    ((void (*)(id, SEL, id))objc_msgSend)(configuration, NSSelectorFromString(@"setWallpaperOptions:"), options);
+    // The view keeps its treated image in iOS's wallpaper cache under this name, and takes
+    // whatever is there: one name per image and size.
+    NSString *cacheGroup = [NSString stringWithFormat:@"LockScreenRestore-%@-%.0fx%.0f", name, sized.size.width, sized.size.height];
+    return ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
+        [viewClass alloc], viewInit, frame, configuration, 0, cacheGroup, nil, 0);
+}
+
 // iOS 15's own live wallpaper view. iOS 16 still has it, renamed (SBFIrisWallpaperView ->
 // PBUIIrisWallpaperView), only +wallpaperViewClassForWallpaperType: no longer hands it out.
 // It takes a still, a video and the still's time in the video (0 for Apple's designs: the
@@ -1190,7 +1261,7 @@ static UIView *LSRLegacyIrisView(NSString *dir, NSString *variant, CGRect frame)
     ((void (*)(id, SEL, id))objc_msgSend)(configuration, NSSelectorFromString(@"setWallpaperOptions:"), options);
     // Option 8 prepares the video player; without it the view stays a still.
     UIView *view = ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
-        [viewClass alloc], viewInit, frame, configuration, 0, @"LockScreenRestore", nil, 8);
+        [viewClass alloc], viewInit, frame, configuration, 0, [@"LockScreenRestore-live-" stringByAppendingString:base.lastPathComponent], nil, 8);
     // It starts in iris mode 0, the playable one (1 is a plain still).
     return view;
 }
@@ -1205,6 +1276,7 @@ static UIView *LSRLegacyIrisView(NSString *dir, NSString *variant, CGRect frame)
     UIImageView *_imageView;
     UIView *_bokehView;
     UIView *_irisView;
+    UIView *_staticView;    // iOS 15's own view for the still, with its Perspective Zoom
     UIView *_dimView;
     AVPlayer *_player;
     AVPlayerLayer *_playerLayer;
@@ -1283,7 +1355,8 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    BOOL perspective = sLSRPerspectiveZoom && !_bokehView;
+    // Our own Perspective Zoom only where Apple's view doesn't do it.
+    BOOL perspective = sLSRPerspectiveZoom && !_bokehView && !_staticView;
     CGFloat margin = perspective ? kLSRPerspectiveMargin : 0.0;
     // Landscape (iPhone Plus models): iOS keeps the wallpaper window portrait-sized and turns it
     // with the interface, the way its own wallpaper view is a square that fits both. Counter-turn
@@ -1296,12 +1369,19 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _contentView.bounds = CGRectMake(0, 0, size.width + 2 * margin, size.height + 2 * margin);
     _contentView.center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
     _contentView.transform = CGAffineTransformMakeRotation(-angle);
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    _playerLayer.frame = _contentView.bounds;
-    [CATransaction commit];
     _bokehView.frame = _contentView.bounds;
     _irisView.frame = _contentView.bounds;
+    _staticView.frame = _contentView.bounds;
+    // The video plays right on top of the still: inside Apple's view it lies in the image
+    // view, so it has the image's size and moves with it.
+    UIView *stillHost = [_staticView respondsToSelector:@selector(contentView)]
+        ? ((id (*)(id, SEL))objc_msgSend)(_staticView, @selector(contentView)) : nil;
+    CALayer *videoHost = stillHost ? stillHost.layer : _contentView.layer;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if (_playerLayer.superlayer != videoHost) [videoHost addSublayer:_playerLayer];
+    _playerLayer.frame = videoHost.bounds;
+    [CATransaction commit];
     [self _updatePerspective:perspective angle:angle];
 }
 
@@ -1382,6 +1462,11 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _bokehView = nil;
     [_irisView removeFromSuperview];
     _irisView = nil;
+    // Keep the video layer: it moves back into Apple's view on the next layout.
+    [_contentView.layer addSublayer:_playerLayer];
+    if ([_staticView respondsToSelector:@selector(invalidate)]) ((void (*)(id, SEL))objc_msgSend)(_staticView, @selector(invalidate));
+    [_staticView removeFromSuperview];
+    _staticView = nil;
     if (LSRIsBokehDesign(dir)) {
         // Dynamic: Apple's animated bokeh, no video.
         _bokehView = LSRBokehView(dir, [variant isEqualToString:@"Dark"], _contentView.bounds);
@@ -1395,7 +1480,15 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         return;
     }
     [self setNeedsLayout];
-    _imageView.image = LSRWallpaperStillIn(dir, variant);
+    UIImage *still = LSRWallpaperStillIn(dir, variant);
+    // Named after the design, the appearance and the file's date (a photo can be replaced).
+    NSString *stillPath = [[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"heic"];
+    NSDate *modified = [[NSFileManager defaultManager] attributesOfItemAtPath:stillPath error:nil].fileModificationDate;
+    NSString *stillName = [NSString stringWithFormat:@"%@-%@-%.0f", dir.lastPathComponent, variant, modified.timeIntervalSince1970];
+    _staticView = LSRLegacyStaticView(still, stillName, _contentView.bounds, sLSRPerspectiveZoom);
+    LSRDebugLog(@"static view %@", _staticView);
+    if (_staticView) [_contentView insertSubview:_staticView aboveSubview:_imageView];
+    _imageView.image = _staticView ? nil : still;
     // Test switch: "lsr-legacy-live" shows and plays the design with iOS 15's own live
     // wallpaper view instead.
     if (dir && [[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-legacy-live"]) {
@@ -1459,6 +1552,7 @@ static __weak LSRLiveWallpaperView *sLSRWallpaperView = nil;
 @end
 
 @interface LSRStillCoverView : UIImageView
+- (void)_reload;
 - (void)updateLiveMirror;
 @end
 
@@ -1475,19 +1569,26 @@ static __weak LSRLiveWallpaperView *sLSRWallpaperView = nil;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
+// The still the way the wallpaper window shows it at rest: cut to Apple's size and centered
+// (a Dynamic design's thumbnail just fills the screen).
 - (void)_reload {
-    self.image = LSRWallpaperStill(LSRWallpaperVariant(self.traitCollection));
+    UIImage *still = LSRWallpaperStill(LSRWallpaperVariant(self.traitCollection));
+    BOOL bokeh = LSRIsBokehDesign(sLSRWallpaperDesignDir);
+    UIImage *sized = bokeh ? nil : LSRAppleSizedStill(still, sLSRPerspectiveZoom);
+    self.contentMode = sized ? UIViewContentModeCenter : UIViewContentModeScaleAspectFill;
+    self.image = sized ?: still;
     [self updateLiveMirror];
 }
 
-// A Dynamic wallpaper keeps moving, and a still of it would jump: the copy mirrors the wallpaper
-// window's live view instead (a portal, like iOS's own copies), as long as that window shows
-// the same design on both screens. The still stays underneath.
+// The wallpaper moves (bubbles, Perspective Zoom, a playing video), and a still of it would
+// jump: the copy mirrors the wallpaper window's live view instead (a portal, like iOS's own
+// copies), as long as that window shows the same design on both screens. The still stays
+// underneath.
 - (void)updateLiveMirror {
     LSRLiveWallpaperView *live = sLSRWallpaperView;
     BOOL sameDesign = !sLSRHomeDesignDir || [sLSRHomeDesignDir isEqualToString:sLSRWallpaperDesignDir];
     Class portalClass = NSClassFromString(@"_UIPortalView");
-    BOOL wanted = live && sameDesign && LSRIsBokehDesign(sLSRWallpaperDesignDir) && portalClass;
+    BOOL wanted = live && sameDesign && portalClass;
     _UIPortalView *portal = nil;
     for (UIView *sub in self.subviews) {
         if ([sub isKindOfClass:portalClass]) portal = (_UIPortalView *)sub;
@@ -1537,10 +1638,9 @@ static void LSRCoverWithStill(UIView *effectView) {
     }
     if (!cover) {
         cover = [[LSRStillCoverView alloc] initWithFrame:effectView.bounds];
-        cover.contentMode = UIViewContentModeScaleAspectFill;
         cover.clipsToBounds = YES;
         cover.userInteractionEnabled = NO;
-        cover.image = LSRWallpaperStill(LSRWallpaperVariant(effectView.traitCollection));
+        [cover _reload];
     }
     if (effectView.subviews.lastObject != cover) [effectView addSubview:cover];
     if (!CGRectEqualToRect(cover.frame, effectView.bounds)) cover.frame = effectView.bounds;
