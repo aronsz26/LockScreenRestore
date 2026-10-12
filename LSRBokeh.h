@@ -1,12 +1,18 @@
 // iOS 15's Dynamic wallpapers (bokeh) for both SpringBoard and Settings.
 //
-// iOS 16 still ships them: their colors live in the system's Bokeh wallpaper collection
-// (/Library/Wallpaper/Collections/Bokeh.wallpaperCollection/Wallpapers/<id>.<Name>.wallpaper/
-// Wallpaper.plist, a light "default" and a "dark" set each), and WallpaperKit's WKBokehView
-// draws them, animated and with its own parallax. A Dynamic design is stored as the absolute
-// path of its .wallpaper folder instead of a name in our wallpapers folder.
+// iOS 16 still ships iOS 15's own bokeh view, renamed (SBFBokehWallpaperView ->
+// PBUIBokehWallpaperView, the way iPadOS 16 draws Dynamic wallpapers), and its presets:
+// +[Bokeh presetWallpaperOptions] in ProceduralWallpapers.bundle lists the same 14 on 15.8 and
+// 16.1, seven on black ("newblue", ...) and seven light ones ("Blue_v01", "BokehGradient", ...),
+// each with Apple's thumbnail. That view draws them, animated and with its own parallax.
+//
+// A Dynamic design is stored as the absolute path of its folder in iOS 16's Bokeh collection
+// (/Library/Wallpaper/Collections/Bokeh.wallpaperCollection/Wallpapers/<id>.<Name>.wallpaper),
+// which pairs the same designs as a light "default" and a "dark" set. WallpaperKit's WKBokehView
+// (iOS 16's own renderer for that collection) is only the fallback.
 
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
 
@@ -53,10 +59,17 @@ static inline NSArray<UIColor *> *LSRBokehColors(NSArray *hexes) {
     NSMutableArray *colors = [NSMutableArray new];
     for (NSString *hex in hexes) {
         if (![hex isKindOfClass:[NSString class]]) continue;
-        unsigned int rgb = 0;
-        [[NSScanner scannerWithString:[hex stringByReplacingOccurrencesOfString:@"#" withString:@""]] scanHexInt:&rgb];
-        [colors addObject:[UIColor colorWithRed:((rgb >> 16) & 0xFF) / 255.0 green:((rgb >> 8) & 0xFF) / 255.0
-                                           blue:(rgb & 0xFF) / 255.0 alpha:1.0]];
+        // "#RRGGBB" or "#RRGGBBAA".
+        NSString *digits = [hex stringByReplacingOccurrencesOfString:@"#" withString:@""];
+        unsigned int value = 0;
+        [[NSScanner scannerWithString:digits] scanHexInt:&value];
+        CGFloat alpha = 1.0;
+        if (digits.length > 6) {
+            alpha = (value & 0xFF) / 255.0;
+            value >>= 8;
+        }
+        [colors addObject:[UIColor colorWithRed:((value >> 16) & 0xFF) / 255.0 green:((value >> 8) & 0xFF) / 255.0
+                                           blue:(value & 0xFF) / 255.0 alpha:alpha]];
     }
     return colors;
 }
@@ -73,8 +86,8 @@ static inline id LSRBokehInput(NSString *dir, BOOL dark) {
         [asset[@"parallaxMultiplier"] doubleValue], [asset[@"thumbnailSeed"] unsignedLongLongValue]);
 }
 
-// Apple's animated bokeh view; nil when this iOS doesn't have it.
-static inline UIView *LSRBokehView(NSString *dir, BOOL dark, CGRect frame) {
+// WallpaperKit's animated bokeh view; nil when this iOS doesn't have it.
+static inline UIView *LSRCollectionBokehView(NSString *dir, BOOL dark, CGRect frame) {
     id input = LSRBokehInput(dir, dark);
     Class viewClass = NSClassFromString(@"WKBokehView");
     if (!input || ![viewClass instancesRespondToSelector:@selector(initWithBokehWallpaperInput:)]) return nil;
@@ -88,27 +101,42 @@ static inline UIView *LSRBokehView(NSString *dir, BOOL dark, CGRect frame) {
     return view;
 }
 
-// iOS 15's own bokeh view. iOS 16 still has it, renamed (SBFBokehWallpaperView ->
-// PBUIBokehWallpaperView, the way iPadOS 16 draws Dynamic wallpapers), and the presets it takes
-// are unchanged: +[Bokeh presetWallpaperOptions] in ProceduralWallpapers.bundle lists the same
-// 14 on 15.8 and 16.1 ("newblue", ..., "BokehGradient"). It picks light or dark colors itself.
-static inline NSString *LSRLegacyBokehVariant(NSString *dir) {
-    static NSDictionary *variants;
+// The preset iOS 15 had for a design of the collection, per appearance. Orange and Purple only
+// exist on black and the two silvers only light: those look the same in both appearances.
+static inline NSString *LSRLegacyBokehVariant(NSString *dir, BOOL dark) {
+    static NSDictionary<NSString *, NSArray<NSString *> *> *variants;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        variants = @{ @"Multicolored": @"newmixedcolors", @"Green": @"newgreen", @"Yellow": @"newyellow",
-                      @"Orange": @"neworange", @"Red": @"newred", @"Purple": @"newpurple", @"Blue": @"newblue",
-                      @"Warm_Silver": @"BokehGradient", @"Cool_Silver": @"BokehGradientSilver" };
+        variants = @{ @"Multicolored": @[@"BokehGradient", @"newmixedcolors"], @"Green": @[@"Green_v01", @"newgreen"],
+                      @"Yellow": @[@"Yellow_v03", @"newyellow"], @"Orange": @[@"neworange", @"neworange"],
+                      @"Red": @[@"Red_v01", @"newred"], @"Purple": @[@"newpurple", @"newpurple"],
+                      @"Blue": @[@"Blue_v01", @"newblue"], @"Warm_Silver": @[@"Silver_v01", @"Silver_v01"],
+                      @"Cool_Silver": @[@"BokehGradientSilver", @"BokehGradientSilver"] };
     });
     NSString *folder = dir.lastPathComponent.stringByDeletingPathExtension;
     NSRange dot = [folder rangeOfString:@"."];
-    return variants[dot.location == NSNotFound ? folder : [folder substringFromIndex:NSMaxRange(dot)]];
+    return variants[dot.location == NSNotFound ? folder : [folder substringFromIndex:NSMaxRange(dot)]][dark ? 1 : 0];
 }
 
-static inline UIView *LSRLegacyBokehViewForVariant(NSString *variant, CGRect frame) {
-    if (!variant.length) return nil;
-    dlopen("/System/Library/PrivateFrameworks/PaperBoardUI.framework/PaperBoardUI", RTLD_NOW);
-    [[NSBundle bundleWithPath:@"/System/Library/ProceduralWallpaper/ProceduralWallpapers.bundle"] load];
+static inline NSBundle *LSRProceduralWallpapersBundle(void) {
+    static NSBundle *bundle;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/PaperBoardUI.framework/PaperBoardUI", RTLD_NOW);
+        bundle = [NSBundle bundleWithPath:@"/System/Library/ProceduralWallpaper/ProceduralWallpapers.bundle"];
+        [bundle load];
+    });
+    return bundle;
+}
+
+// The view showing a design right now (the wallpaper window's): its snapshot has the bubbles
+// where they are on screen.
+static __weak UIView *sLSRLiveBokehView = nil;
+static const void *const kLSRBokehVariantKey = &kLSRBokehVariantKey;
+
+static inline UIView *LSRLegacyBokehView(NSString *dir, BOOL dark, CGRect frame) {
+    NSString *variant = LSRLegacyBokehVariant(dir, dark);
+    if (!variant || !LSRProceduralWallpapersBundle()) return nil;
     Class configurationClass = NSClassFromString(@"PBUIWallpaperConfiguration");
     Class viewClass = NSClassFromString(@"PBUIBokehWallpaperView");
     SEL configurationInit = NSSelectorFromString(@"initWithVariant:type:");
@@ -120,8 +148,30 @@ static inline UIView *LSRLegacyBokehViewForVariant(NSString *variant, CGRect fra
         @"kSBUIMagicWallpaperIdentifierKey": @"Bokeh",
         @"kSBUIMagicWallpaperPresetOptionsKey": @{ @"bokehVariant": variant },
     });
-    return ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
+    UIView *view = ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
         [viewClass alloc], viewInit, frame, configuration, 0, @"LockScreenRestore", nil, 0);
+    objc_setAssociatedObject(view, kLSRBokehVariantKey, variant, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    return view;
+}
+
+// Apple's thumbnail of a preset (NewBokeh-Dark-Blue_thumb, ...).
+static inline UIImage *LSRLegacyBokehThumbnail(NSString *variant) {
+    Class bokeh = [LSRProceduralWallpapersBundle() classNamed:@"Bokeh"];
+    if (!variant || ![bokeh respondsToSelector:@selector(presetWallpaperOptions)]) return nil;
+    NSArray *presets = ((id (*)(id, SEL))objc_msgSend)(bokeh, @selector(presetWallpaperOptions));
+    for (NSDictionary *preset in presets) {
+        if (![preset isKindOfClass:[NSDictionary class]] || ![preset[@"bokehVariant"] isEqual:variant]) continue;
+        NSString *name = preset[@"thumbnailImageName"] ?: preset[@"kSBUIMagicWallpaperThumbnailNameKey"];
+        return name ? [UIImage imageNamed:name inBundle:LSRProceduralWallpapersBundle() compatibleWithTraitCollection:nil] : nil;
+    }
+    return nil;
+}
+
+// Apple's animated bokeh view for a design: iOS 15's, else WallpaperKit's.
+static inline UIView *LSRBokehView(NSString *dir, BOOL dark, CGRect frame) {
+    UIView *view = LSRLegacyBokehView(dir, dark, frame) ?: LSRCollectionBokehView(dir, dark, frame);
+    sLSRLiveBokehView = view;
+    return view;
 }
 
 static inline void LSRSetBokehAnimating(UIView *view, BOOL animating) {
@@ -138,8 +188,28 @@ static inline UIImage *LSRBokehImage(NSString *dir, BOOL dark, CGSize size) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{ cache = [NSCache new]; });
     NSString *key = [NSString stringWithFormat:@"%@|%d|%.0fx%.0f", dir, dark, size.width, size.height];
+    // The bubbles as they are on screen, when a view shows this design (never cached).
+    NSString *variant = LSRLegacyBokehVariant(dir, dark);
+    UIView *live = sLSRLiveBokehView;
+    if (variant && live.window && [objc_getAssociatedObject(live, kLSRBokehVariantKey) isEqual:variant]
+        && [live respondsToSelector:@selector(snapshotImage)]) {
+        UIImage *snapshot = ((id (*)(id, SEL))objc_msgSend)(live, @selector(snapshotImage));
+        if ([snapshot isKindOfClass:[UIImage class]] && snapshot.size.width > 0) return snapshot;
+    }
     UIImage *image = [cache objectForKey:key];
     if (image) return image;
+    // Apple's thumbnail of the preset, scaled to the size asked for.
+    UIImage *presetThumbnail = LSRLegacyBokehThumbnail(variant);
+    if (presetThumbnail.size.width > 0) {
+        UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+        image = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            CGFloat scale = MAX(size.width / presetThumbnail.size.width, size.height / presetThumbnail.size.height);
+            CGSize drawn = CGSizeMake(presetThumbnail.size.width * scale, presetThumbnail.size.height * scale);
+            [presetThumbnail drawInRect:CGRectMake((size.width - drawn.width) / 2, (size.height - drawn.height) / 2, drawn.width, drawn.height)];
+        }];
+        [cache setObject:image forKey:key];
+        return image;
+    }
     // Apple's own thumbnail renderer draws the bubbles too (a plain snapshot of the view only
     // has the gradient: the bubbles appear once it's on screen). Scaled to the size asked for.
     id input = LSRBokehInput(dir, dark);
@@ -156,7 +226,7 @@ static inline UIImage *LSRBokehImage(NSString *dir, BOOL dark, CGSize size) {
         [cache setObject:image forKey:key];
         return image;
     }
-    UIView *view = LSRBokehView(dir, dark, CGRectMake(0, 0, size.width, size.height));
+    UIView *view = LSRCollectionBokehView(dir, dark, CGRectMake(0, 0, size.width, size.height));
     if (!view) return nil;
     LSRSetBokehAnimating(view, NO);
     [view setNeedsLayout];
