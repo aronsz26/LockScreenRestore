@@ -68,7 +68,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like
 <img src="screenshots/notifications.png" width="180" align="right" alt="Notifications">
 
 - Notifications are listed **right under the clock** instead of collected at the bottom
-- iOS 15 card shape: smaller rounded corners (13 pt instead of 23.5 pt), tighter padding, one-line cards 58 pt tall instead of 66 pt
+- iOS 15 card shape: smaller rounded corners (18.5 pt instead of 23.5 pt), tighter padding, one-line cards 58 pt tall instead of 66 pt
 - iOS 15's narrower side margins
 - Swipe up to see older notifications: the **Notification Centre** header with its ✕ button only appears then, like on iOS 15, and never flashes while unlocking
 

@@ -765,8 +765,14 @@ static UIView *LSRFocusIndicator(UIView *focusView) {
 // iOS 16 lays the lock screen notification list out from the bottom up
 // (NCNotificationListView.layoutFromBottom); iOS 15 listed them top-down under the date.
 
-static const CGFloat kIOS15CardCornerRadius = 13.0;
+// iOS 15.0-15.8 (UserNotificationsUIKit): a card's corners are concentric with its icon,
+// NCCornerRadiusConcentricWithProminentIcon() = the icon's 8.5pt + 10pt = 18.5pt, and the list
+// keeps 10pt at the sides (insetHorizontalMarginForNotificationListComponent:).
+static const CGFloat kIOS15CardCornerRadius = 18.5;
+static const CGFloat kIOS15CardSideMargin = 10.0;
 static const CGFloat kIOS15CardInsetReduction = 4.0;
+// The music player's platter keeps the corners and the width it was built for.
+static const CGFloat kIOS15PlatterCornerRadius = 13.0;
 
 @interface NCNotificationShortLookView : UIView
 - (CGFloat)_continuousCornerRadius;
@@ -791,6 +797,10 @@ static const CGFloat kIOS16ListInset = 10.0;
 
 @interface ACUISActivityMetricsRequest : NSObject <NSCopying>
 @property (nonatomic, copy) ACUISActivityItemMetricsRequest *lockScreenMetrics;
+@end
+
+@interface NCNotificationListCell : UIView
+@property (readonly, nonatomic) UIView *contentView;
 @end
 
 @interface NCNotificationListSectionHeaderView : UIView
@@ -866,12 +876,48 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 %end
 
 
-// iOS 15 cards had ~8pt side margins (measured 8.6pt incl. anti-aliasing); iOS 16 uses 10.
+// The list (and the music player in it) sits 8pt from the sides.
 %hook CSCombinedListViewController
 - (CGFloat)horizontalInsetMargin {
     return kIOS15ListInset;
 }
 
+%end
+
+// Notification cards keep iOS 15's 10pt: each one is laid out (and measured) that much
+// narrower inside its cell. The music player's cell (a supplementary view) stays as wide as
+// the list.
+static BOOL LSRCellHoldsNotification(NCNotificationListCell *cell) {
+    UIView *hosted = cell.contentView.subviews.firstObject;
+    return hosted && ![hosted isKindOfClass:NSClassFromString(@"NCNotificationListSupplementaryHostingView")];
+}
+
+%hook NCNotificationListCell
+- (void)_layoutContentView {
+    %orig;
+    if (!LSRCellHoldsNotification(self)) return;
+    CGFloat inset = kIOS15CardSideMargin - kIOS15ListInset;
+    UIView *content = self.contentView;
+    CGRect frame = content.frame;
+    if (fabs(CGRectGetWidth(frame) - CGRectGetWidth(self.bounds)) > 0.01) return;
+    content.frame = CGRectInset(frame, inset, 0.0);
+    // iOS sized the hosted view for the full width before.
+    for (UIView *hosted in content.subviews) {
+        CGRect hostedFrame = hosted.frame;
+        if (fabs(CGRectGetWidth(hostedFrame) - CGRectGetWidth(frame)) > 0.01) continue;
+        hostedFrame.size.width = CGRectGetWidth(content.bounds);
+        hosted.frame = hostedFrame;
+    }
+}
+
+- (CGSize)sizeThatFits:(CGSize)fits {
+    if (!LSRCellHoldsNotification(self)) return %orig;
+    CGFloat inset = kIOS15CardSideMargin - kIOS15ListInset;
+    fits.width = MAX(0.0, fits.width - 2.0 * inset);
+    CGSize size = %orig(fits);
+    size.width += 2.0 * inset;
+    return size;
+}
 %end
 
 // Live Activities (like the music player) get a fixed width from the activity metrics, made
@@ -893,7 +939,7 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 }
 %end
 
-// Card shape, measured on Apple's iOS 15 lock screen: 13pt corners (iOS 16: 23.5), and every
+// Card shape, measured on Apple's iOS 15 lock screen: 18.5pt corners (iOS 16: 23.5), and every
 // inner inset 4pt tighter — icon 10pt from the edges (iOS 16: 14), date 13pt from the right
 // (17), one-line card 58pt tall (66). Instead of re-implementing iOS 16's layout, let it lay
 // out (and measure) for a size 8pt larger than the real one, then view it through a bounds
@@ -2175,16 +2221,16 @@ static void LSRBrightenSliderFill(MRUSlider *slider) {
 
 %end // LSRMediaPlayer
 
-// SpringBoard side: the platter around the player (and any other Live Activity) gets iOS 15's
-// 13pt corners like the notification cards; iOS 16 uses 23.5 for the platter, its material
+// SpringBoard side: the platter around the player (and any other Live Activity) gets 13pt
+// corners; iOS 16 uses 23.5 for the platter, its material
 // and the hosted scene view inside it.
 @interface NCNotificationListSupplementaryHostingView : UIView
 @end
 
 static void LSRRoundActivityPlatter(UIView *view, NSUInteger depth) {
     CGFloat radius = view.layer.cornerRadius;
-    if (radius > kIOS15CardCornerRadius + 0.01 && radius < 30.0) {
-        view.layer.cornerRadius = kIOS15CardCornerRadius;
+    if (radius > kIOS15PlatterCornerRadius + 0.01 && radius < 30.0) {
+        view.layer.cornerRadius = kIOS15PlatterCornerRadius;
         view.layer.cornerCurve = kCACornerCurveContinuous;
     }
     if (depth >= 10) return;
@@ -2195,7 +2241,7 @@ static void LSRRoundActivityPlatter(UIView *view, NSUInteger depth) {
 
 %hook NCNotificationListSupplementaryHostingView
 - (void)_setContinuousCornerRadius:(CGFloat)radius {
-    %orig(kIOS15CardCornerRadius);
+    %orig(kIOS15PlatterCornerRadius);
 }
 
 - (void)layoutSubviews {
