@@ -129,11 +129,6 @@ static inline NSBundle *LSRProceduralWallpapersBundle(void) {
     return bundle;
 }
 
-// The view showing a design right now (the wallpaper window's): its snapshot has the bubbles
-// where they are on screen.
-static __weak UIView *sLSRLiveBokehView = nil;
-static const void *const kLSRBokehVariantKey = &kLSRBokehVariantKey;
-
 static inline UIView *LSRLegacyBokehView(NSString *dir, BOOL dark, CGRect frame) {
     NSString *variant = LSRLegacyBokehVariant(dir, dark);
     if (!variant || !LSRProceduralWallpapersBundle()) return nil;
@@ -148,10 +143,8 @@ static inline UIView *LSRLegacyBokehView(NSString *dir, BOOL dark, CGRect frame)
         @"kSBUIMagicWallpaperIdentifierKey": @"Bokeh",
         @"kSBUIMagicWallpaperPresetOptionsKey": @{ @"bokehVariant": variant },
     });
-    UIView *view = ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
+    return ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
         [viewClass alloc], viewInit, frame, configuration, 0, @"LockScreenRestore", nil, 0);
-    objc_setAssociatedObject(view, kLSRBokehVariantKey, variant, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    return view;
 }
 
 // Apple's thumbnail of a preset (NewBokeh-Dark-Blue_thumb, ...).
@@ -169,9 +162,7 @@ static inline UIImage *LSRLegacyBokehThumbnail(NSString *variant) {
 
 // Apple's animated bokeh view for a design: iOS 15's, else WallpaperKit's.
 static inline UIView *LSRBokehView(NSString *dir, BOOL dark, CGRect frame) {
-    UIView *view = LSRLegacyBokehView(dir, dark, frame) ?: LSRCollectionBokehView(dir, dark, frame);
-    sLSRLiveBokehView = view;
-    return view;
+    return LSRLegacyBokehView(dir, dark, frame) ?: LSRCollectionBokehView(dir, dark, frame);
 }
 
 static inline void LSRSetBokehAnimating(UIView *view, BOOL animating) {
@@ -182,20 +173,14 @@ static inline void LSRSetBokehAnimating(UIView *view, BOOL animating) {
     }
 }
 
-// A still frame, for thumbnails and for the lock screen's copies while it slides away.
+// A still frame, for thumbnails and (where the live view can't be mirrored) for the lock
+// screen's copies while it slides away. (The view's own -snapshotImage comes back empty.)
 static inline UIImage *LSRBokehImage(NSString *dir, BOOL dark, CGSize size) {
     static NSCache *cache;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ cache = [NSCache new]; });
     NSString *key = [NSString stringWithFormat:@"%@|%d|%.0fx%.0f", dir, dark, size.width, size.height];
-    // The bubbles as they are on screen, when a view shows this design (never cached).
     NSString *variant = LSRLegacyBokehVariant(dir, dark);
-    UIView *live = sLSRLiveBokehView;
-    if (variant && live.window && [objc_getAssociatedObject(live, kLSRBokehVariantKey) isEqual:variant]
-        && [live respondsToSelector:@selector(snapshotImage)]) {
-        UIImage *snapshot = ((id (*)(id, SEL))objc_msgSend)(live, @selector(snapshotImage));
-        if ([snapshot isKindOfClass:[UIImage class]] && snapshot.size.width > 0) return snapshot;
-    }
     UIImage *image = [cache objectForKey:key];
     if (image) return image;
     // Apple's thumbnail of the preset, scaled to the size asked for.

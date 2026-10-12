@@ -1395,7 +1395,16 @@ static __weak LSRLiveWallpaperView *sLSRWallpaperView = nil;
 // swipes), iOS draws a portal copy of its real wallpaper inside the lock screen window
 // (SBWallpaperEffectView > PBUIWallpaperView > PBUIPortalReplicaEffectView). That's the old
 // wallpaper flashing; cover those copies with our still too.
+@interface _UIPortalView : UIView
+@property (nonatomic, weak) UIView *sourceView;
+@property (nonatomic) BOOL hidesSourceView;
+@property (nonatomic) BOOL matchesPosition;
+@property (nonatomic) BOOL matchesTransform;
+@property (nonatomic) BOOL matchesAlpha;
+@end
+
 @interface LSRStillCoverView : UIImageView
+- (void)updateLiveMirror;
 @end
 
 @implementation LSRStillCoverView
@@ -1413,6 +1422,41 @@ static __weak LSRLiveWallpaperView *sLSRWallpaperView = nil;
 
 - (void)_reload {
     self.image = LSRWallpaperStill(LSRWallpaperVariant(self.traitCollection));
+    [self updateLiveMirror];
+}
+
+// A Dynamic wallpaper keeps moving, and a still of it would jump: the copy mirrors the wallpaper
+// window's live view instead (a portal, like iOS's own copies), as long as that window shows
+// the same design on both screens. The still stays underneath.
+- (void)updateLiveMirror {
+    LSRLiveWallpaperView *live = sLSRWallpaperView;
+    BOOL sameDesign = !sLSRHomeDesignDir || [sLSRHomeDesignDir isEqualToString:sLSRWallpaperDesignDir];
+    Class portalClass = NSClassFromString(@"_UIPortalView");
+    BOOL wanted = live && sameDesign && LSRIsBokehDesign(sLSRWallpaperDesignDir) && portalClass;
+    _UIPortalView *portal = nil;
+    for (UIView *sub in self.subviews) {
+        if ([sub isKindOfClass:portalClass]) portal = (_UIPortalView *)sub;
+    }
+    if (!wanted) {
+        [portal removeFromSuperview];
+        return;
+    }
+    if (!portal) {
+        portal = [[portalClass alloc] initWithFrame:self.bounds];
+        portal.userInteractionEnabled = NO;
+        portal.hidesSourceView = NO;
+        portal.matchesPosition = NO;
+        portal.matchesTransform = NO;
+        portal.matchesAlpha = NO;
+        [self addSubview:portal];
+    }
+    if (portal.sourceView != live) portal.sourceView = live;
+    if (!CGRectEqualToRect(portal.frame, self.bounds)) portal.frame = self.bounds;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    [self updateLiveMirror];
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
@@ -1445,6 +1489,7 @@ static void LSRCoverWithStill(UIView *effectView) {
     }
     if (effectView.subviews.lastObject != cover) [effectView addSubview:cover];
     if (!CGRectEqualToRect(cover.frame, effectView.bounds)) cover.frame = effectView.bounds;
+    [cover updateLiveMirror];
 }
 
 @interface SBWallpaperEffectView : UIView
