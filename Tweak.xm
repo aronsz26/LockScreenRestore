@@ -1158,44 +1158,6 @@ static UIView *LSRLegacyStaticView(UIImage *still, NSString *name, CGRect frame,
         [viewClass alloc], viewInit, frame, configuration, 0, cacheGroup, nil, 0);
 }
 
-// iOS 15's own live wallpaper view. iOS 16 still has it, renamed (SBFIrisWallpaperView ->
-// PBUIIrisWallpaperView), only +wallpaperViewClassForWallpaperType: no longer hands it out.
-// It takes a still, a video and the still's time in the video (0 for Apple's designs: the
-// still is the first frame) and plays through Apple's Live Photo player.
-static UIView *LSRLegacyIrisView(NSString *dir, NSString *variant, CGRect frame) {
-    dlopen("/System/Library/PrivateFrameworks/PaperBoardUI.framework/PaperBoardUI", RTLD_NOW);
-    NSString *base = [dir stringByAppendingPathComponent:variant];
-    NSURL *imageURL = [NSURL fileURLWithPath:[base stringByAppendingPathExtension:@"heic"]];
-    NSURL *videoURL = [NSURL fileURLWithPath:[base stringByAppendingPathExtension:@"mov"]];
-    UIImage *still = [UIImage imageWithContentsOfFile:imageURL.path];
-    if (!still.CGImage || ![[NSFileManager defaultManager] fileExistsAtPath:videoURL.path]) return nil;
-    Class imageClass = NSClassFromString(@"PBUIWallpaperImage");
-    Class optionsClass = NSClassFromString(@"PBUIWallpaperOptions");
-    Class configurationClass = NSClassFromString(@"PBUIWallpaperConfiguration");
-    Class viewClass = NSClassFromString(@"PBUIIrisWallpaperView");
-    SEL imageInit = NSSelectorFromString(@"initWithCGImage:scale:orientation:wallpaperFileURL:");
-    SEL optionsMake = NSSelectorFromString(@"optionsWithName:parallaxFactor:zoomScale:supportsCropping:cropRect:portrait:hasVideo:stillTimeInVideo:");
-    SEL viewInit = NSSelectorFromString(@"initWithFrame:configuration:variant:cacheGroup:delegate:options:");
-    if (![imageClass instancesRespondToSelector:imageInit] || ![optionsClass respondsToSelector:optionsMake]
-        || ![configurationClass instancesRespondToSelector:NSSelectorFromString(@"initWithVariant:type:")]
-        || ![viewClass instancesRespondToSelector:viewInit]) return nil;
-    id image = ((id (*)(id, SEL, CGImageRef, CGFloat, NSInteger, id))objc_msgSend)(
-        [imageClass alloc], imageInit, still.CGImage, [UIScreen mainScreen].scale, still.imageOrientation, imageURL);
-    id options = ((id (*)(id, SEL, id, double, double, BOOL, CGRect, BOOL, BOOL, double))objc_msgSend)(
-        optionsClass, optionsMake, dir.lastPathComponent, 1.0, 1.0, NO, CGRectZero, YES, YES, 0.0);
-    // Variant 0 is the lock screen, wallpaper type 3 was iOS 15's live wallpaper.
-    id configuration = ((id (*)(id, SEL, long long, long long))objc_msgSend)(
-        [configurationClass alloc], NSSelectorFromString(@"initWithVariant:type:"), 0, 3);
-    ((void (*)(id, SEL, id))objc_msgSend)(configuration, NSSelectorFromString(@"setWallpaperImage:"), image);
-    ((void (*)(id, SEL, id))objc_msgSend)(configuration, NSSelectorFromString(@"setVideoURL:"), videoURL);
-    ((void (*)(id, SEL, id))objc_msgSend)(configuration, NSSelectorFromString(@"setWallpaperOptions:"), options);
-    // Option 8 prepares the video player; without it the view stays a still.
-    UIView *view = ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
-        [viewClass alloc], viewInit, frame, configuration, 0, [@"LockScreenRestore-live-" stringByAppendingString:base.lastPathComponent], nil, 8);
-    // It starts in iris mode 0, the playable one (1 is a plain still).
-    return view;
-}
-
 @interface LSRLiveWallpaperView : UIView
 - (void)playVideo;
 - (void)stopVideo;
@@ -1205,7 +1167,6 @@ static UIView *LSRLegacyIrisView(NSString *dir, NSString *variant, CGRect frame)
     UIView *_contentView;   // image, video and bokeh; moves with the device for Perspective Zoom
     UIImageView *_imageView;
     UIView *_bokehView;
-    UIView *_irisView;
     UIView *_staticView;    // iOS 15's own view for the still, with its Perspective Zoom
     UIView *_dimView;
     AVPlayer *_player;
@@ -1300,7 +1261,6 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _contentView.center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
     _contentView.transform = CGAffineTransformMakeRotation(-angle);
     _bokehView.frame = _contentView.bounds;
-    _irisView.frame = _contentView.bounds;
     _staticView.frame = _contentView.bounds;
     // The video plays right on top of the still: inside Apple's view it lies in the image
     // view, so it has the image's size and moves with it.
@@ -1390,8 +1350,6 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _loadedDir = dir;
     [_bokehView removeFromSuperview];
     _bokehView = nil;
-    [_irisView removeFromSuperview];
-    _irisView = nil;
     // Keep the video layer: it moves back into Apple's view on the next layout.
     [_contentView.layer addSublayer:_playerLayer];
     if ([_staticView respondsToSelector:@selector(invalidate)]) ((void (*)(id, SEL))objc_msgSend)(_staticView, @selector(invalidate));
@@ -1419,13 +1377,6 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     LSRDebugLog(@"static view %@", _staticView);
     if (_staticView) [_contentView insertSubview:_staticView aboveSubview:_imageView];
     _imageView.image = _staticView ? nil : still;
-    // Test switch: "lsr-legacy-live" shows and plays the design with iOS 15's own live
-    // wallpaper view instead.
-    if (dir && [[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-legacy-live"]) {
-        _irisView = LSRLegacyIrisView(dir, variant, _contentView.bounds);
-        LSRDebugLog(@"legacy live view %@", _irisView);
-        if (_irisView) [_contentView insertSubview:_irisView aboveSubview:_imageView];
-    }
     _videoURL = dir ? [NSURL fileURLWithPath:[[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]] : nil;
     [self stopVideo];
 }
@@ -1434,11 +1385,6 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
 // respring) stays "ready" but never plays (AVFoundationErrorDomain -11819).
 - (void)playVideo {
     if (!_videoURL) return;
-    if (_irisView) {
-        ((void (*)(id, SEL, id))objc_msgSend)(_irisView, NSSelectorFromString(@"beginSimulatedTouchWithReason:"), @"LockScreenRestore");
-        LSRDebugLog(@"legacy live play, state %ld", (long)((long long (*)(id, SEL))objc_msgSend)(_irisView, NSSelectorFromString(@"irisPlaybackState")));
-        return;
-    }
     AVPlayerItem *item = [AVPlayerItem playerItemWithURL:_videoURL];
     [_player replaceCurrentItemWithPlayerItem:item];
     _wantsVideoVisible = YES;
@@ -1447,7 +1393,6 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
 }
 
 - (void)stopVideo {
-    if (_irisView) ((void (*)(id, SEL, id))objc_msgSend)(_irisView, NSSelectorFromString(@"endSimulatedTouchWithReason:"), @"LockScreenRestore");
     _wantsVideoVisible = NO;
     [_player pause];
     [CATransaction begin];
