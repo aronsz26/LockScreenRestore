@@ -89,6 +89,24 @@ static NSString *LSRPaneDesignDir(void) {
 
 #pragma mark - Settings: previews
 
+// How much larger than "fills the screen" the lock screen shows a still: with Perspective Zoom
+// iOS 15 cuts a wallpaper to the screen plus an overhang at each side
+// (+[PBUIWallpaperParallaxSettings minimumWallpaperSizeForCurrentDevice]) and shows its middle.
+static CGFloat LSRPaneStillZoom(CGSize image) {
+    id saved = LSRPanePrefs()[@"perspectiveZoom"];
+    if ((saved && ![saved boolValue]) || image.width <= 0 || image.height <= 0) return 1.0;
+    dlopen("/System/Library/PrivateFrameworks/PaperBoardUI.framework/PaperBoardUI", RTLD_NOW);
+    Class settings = NSClassFromString(@"PBUIWallpaperParallaxSettings");
+    SEL minimum = NSSelectorFromString(@"minimumWallpaperSizeForCurrentDevice");
+    if (![settings respondsToSelector:minimum]) return 1.0;
+    CGSize bounds = [UIScreen mainScreen].bounds.size;
+    CGSize screen = CGSizeMake(MIN(bounds.width, bounds.height), MAX(bounds.width, bounds.height));
+    CGSize wanted = ((CGSize (*)(id, SEL))objc_msgSend)(settings, minimum);
+    CGFloat fill = MAX(screen.width / image.width, screen.height / image.height);
+    CGFloat zoomed = MAX(wanted.width / image.width, wanted.height / image.height);
+    return fill > 0 && zoomed > fill ? zoomed / fill : 1.0;
+}
+
 // A miniature lock screen: wallpaper, padlock, time, date, flashlight/camera and home bar,
 // all sized relative to the preview so it reads like a scaled-down screen.
 @interface LSRLockPreviewView : UIView
@@ -146,7 +164,14 @@ static NSString *LSRPaneDesignDir(void) {
 }
 
 - (void)refresh {
-    NSDate *now = [NSDate date];
+    // iOS 15's preview always shows 09:41 on Tuesday, January 9 (2007).
+    NSDateComponents *keynote = [NSDateComponents new];
+    keynote.year = 2007;
+    keynote.month = 1;
+    keynote.day = 9;
+    keynote.hour = 9;
+    keynote.minute = 41;
+    NSDate *now = [[NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian] dateFromComponents:keynote] ?: [NSDate date];
     NSDateFormatter *time = [NSDateFormatter new];
     time.locale = [NSLocale autoupdatingCurrentLocale];
     time.dateFormat = [NSDateFormatter dateFormatFromTemplate:@"jmm" options:0 locale:time.locale];
@@ -183,7 +208,10 @@ static NSString *LSRPaneDesignDir(void) {
     BOOL rounded = LSRPaneScreenIsRounded();
     self.layer.cornerRadius = rounded ? 40.0 * s + 4.0 : 0.0;
     self.flashlight.hidden = self.camera.hidden = self.homeBar.hidden = !rounded;
-    self.imageView.frame = self.bounds;
+    // A Dynamic design's thumbnail just fills the preview.
+    CGFloat zoom = LSRIsBokehDesign(LSRPaneDesignDir()) ? 1.0 : LSRPaneStillZoom(self.imageView.image.size);
+    self.imageView.bounds = CGRectMake(0, 0, w * zoom, h * zoom);
+    self.imageView.center = CGPointMake(w / 2, h / 2);
     self.padlock.frame = CGRectMake((w - 20 * s) / 2, 62 * s, 20 * s, 26 * s);
     self.timeLabel.font = [UIFont systemFontOfSize:80 * s weight:UIFontWeightThin];
     self.timeLabel.frame = CGRectMake(0, 100 * s, w, 90 * s);
@@ -638,6 +666,8 @@ static CGFloat LSRCollectionsGap(void) {
 - (instancetype)initWithImage:(UIImage *)image;
 - (instancetype)initWithImage:(UIImage *)image name:(NSString *)name;
 - (instancetype)initWithImage:(UIImage *)image name:(NSString *)name video:(AVURLAsset *)video time:(double)time;
+- (instancetype)initWithImage:(UIImage *)image video:(AVURLAsset *)video variant:(NSInteger)variant options:(id)options
+      disableSegmentedControl:(BOOL)disableSegmentedControl enableButtons:(BOOL)enableButtons disableContents:(BOOL)disableContents;
 - (void)setImageWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion;
 - (void)setWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion;
 @end
@@ -1321,22 +1351,23 @@ static void LSRRemoteThumbnail(LSRRemoteDesign *design, void (^completion)(UIIma
     });
 }
 
-// Test switch: "lsr-apple-preview" opens a still or live design in iOS's own legacy preview
-// (SBSUIWallpaperPreviewViewController, iOS 15's "Set" screen with its Perspective Zoom and
-// Live Photo buttons) instead of ours.
+// A still or live design opens in iOS's own legacy preview (SBSUIWallpaperPreviewViewController,
+// iOS 15's "Set" screen with its Perspective Zoom and Live Photo buttons); a Dynamic one, or
+// any design on an iOS without that class, in ours.
 - (UIViewController *)_applePreviewFor:(NSString *)design {
-    if (LSRIsBokehDesign(design) || ![[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-apple-preview"]) return nil;
+    if (LSRIsBokehDesign(design)) return nil;
     Class previewClass = NSClassFromString(@"SBSUIWallpaperPreviewViewController");
     BOOL dark = self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
     NSString *base = [[kLSRPaneWallpapersDir stringByAppendingPathComponent:design] stringByAppendingPathComponent:dark ? @"Dark" : @"Light"];
     UIImage *image = [UIImage imageWithContentsOfFile:[base stringByAppendingPathExtension:@"heic"]];
-    if (!image || ![previewClass instancesRespondToSelector:@selector(initWithImage:name:video:time:)]) return nil;
+    if (!image || ![previewClass instancesRespondToSelector:@selector(initWithImage:video:variant:options:disableSegmentedControl:enableButtons:disableContents:)]) return nil;
     NSString *videoPath = [base stringByAppendingPathExtension:@"mov"];
     BOOL live = _kind == LSRWallpaperKindLive && [[NSFileManager defaultManager] fileExistsAtPath:videoPath];
-    // The still is the video's first frame.
-    SBSUIWallpaperPreviewViewController *preview = live
-        ? [[previewClass alloc] initWithImage:image name:design video:[AVURLAsset assetWithURL:[NSURL fileURLWithPath:videoPath]] time:0.0]
-        : [[previewClass alloc] initWithImage:image name:design];
+    // With its own Cancel and Set buttons (the short initializers leave them out). The still is
+    // the video's first frame, which is this initializer's default.
+    AVURLAsset *video = live ? [AVURLAsset assetWithURL:[NSURL fileURLWithPath:videoPath]] : nil;
+    SBSUIWallpaperPreviewViewController *preview = [[previewClass alloc] initWithImage:image video:video variant:0 options:nil
+        disableSegmentedControl:NO enableButtons:YES disableContents:NO];
     preview.previewDelegate = self;
     preview.modalPresentationStyle = UIModalPresentationFullScreen;
     objc_setAssociatedObject(preview, kLSRPreviewDesignKey, design, OBJC_ASSOCIATION_COPY_NONATOMIC);
