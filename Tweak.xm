@@ -767,12 +767,12 @@ static UIView *LSRFocusIndicator(UIView *focusView) {
 
 // iOS 15.0-15.8 (UserNotificationsUIKit): a card's corners are concentric with its icon,
 // NCCornerRadiusConcentricWithProminentIcon() = the icon's 8.5pt + 10pt = 18.5pt, and the list
-// keeps 10pt at the sides (insetHorizontalMarginForNotificationListComponent:).
+// keeps 10pt at the sides (insetHorizontalMarginForNotificationListComponent:), which is what
+// iOS 16 does too: cards, the Focus pill and the music player all sit 10pt from the edges.
 static const CGFloat kIOS15CardCornerRadius = 18.5;
-static const CGFloat kIOS15CardSideMargin = 10.0;
 static const CGFloat kIOS15CardInsetReduction = 4.0;
-// The music player's platter keeps the corners and the width it was built for.
-static const CGFloat kIOS15PlatterCornerRadius = 13.0;
+// The music player's platter (iOS 15.8: the material of CSMediaControlsView's platter).
+static const CGFloat kIOS15PlatterCornerRadius = 18.0;
 
 @interface NCNotificationShortLookView : UIView
 - (CGFloat)_continuousCornerRadius;
@@ -781,9 +781,6 @@ static const CGFloat kIOS15PlatterCornerRadius = 13.0;
 
 @interface NCNotificationSeamlessContentView : UIView
 @end
-
-static const CGFloat kIOS15ListInset = 8.0;
-static const CGFloat kIOS16ListInset = 10.0;
 
 @interface ACUISSizeDimensionRequest : NSObject
 + (instancetype)fixed:(CGFloat)value;
@@ -797,10 +794,6 @@ static const CGFloat kIOS16ListInset = 10.0;
 
 @interface ACUISActivityMetricsRequest : NSObject <NSCopying>
 @property (nonatomic, copy) ACUISActivityItemMetricsRequest *lockScreenMetrics;
-@end
-
-@interface NCNotificationListCell : UIView
-@property (readonly, nonatomic) UIView *contentView;
 @end
 
 @interface NCNotificationListSectionHeaderView : UIView
@@ -875,69 +868,6 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 }
 %end
 
-
-// The list (and the music player in it) sits 8pt from the sides.
-%hook CSCombinedListViewController
-- (CGFloat)horizontalInsetMargin {
-    return kIOS15ListInset;
-}
-
-%end
-
-// Notification cards keep iOS 15's 10pt: each one is laid out (and measured) that much
-// narrower inside its cell. The music player's cell (a supplementary view) stays as wide as
-// the list.
-static BOOL LSRCellHoldsNotification(NCNotificationListCell *cell) {
-    UIView *hosted = cell.contentView.subviews.firstObject;
-    return hosted && ![hosted isKindOfClass:NSClassFromString(@"NCNotificationListSupplementaryHostingView")];
-}
-
-%hook NCNotificationListCell
-- (void)_layoutContentView {
-    %orig;
-    if (!LSRCellHoldsNotification(self)) return;
-    CGFloat inset = kIOS15CardSideMargin - kIOS15ListInset;
-    UIView *content = self.contentView;
-    CGRect frame = content.frame;
-    if (fabs(CGRectGetWidth(frame) - CGRectGetWidth(self.bounds)) > 0.01) return;
-    content.frame = CGRectInset(frame, inset, 0.0);
-    // iOS sized the hosted view for the full width before.
-    for (UIView *hosted in content.subviews) {
-        CGRect hostedFrame = hosted.frame;
-        if (fabs(CGRectGetWidth(hostedFrame) - CGRectGetWidth(frame)) > 0.01) continue;
-        hostedFrame.size.width = CGRectGetWidth(content.bounds);
-        hosted.frame = hostedFrame;
-    }
-}
-
-- (CGSize)sizeThatFits:(CGSize)fits {
-    if (!LSRCellHoldsNotification(self)) return %orig;
-    CGFloat inset = kIOS15CardSideMargin - kIOS15ListInset;
-    fits.width = MAX(0.0, fits.width - 2.0 * inset);
-    CGSize size = %orig(fits);
-    size.width += 2.0 * inset;
-    return size;
-}
-%end
-
-// Live Activities (like the music player) get a fixed width from the activity metrics, made
-// for iOS 16's 10pt margins; widen them to fill the wider platter.
-%hook ACUISActivityHostViewControllerFactory
-+ (id)activityHostViewControllerWithDescriptor:(id)descriptor sceneType:(NSInteger)type metricsRequest:(ACUISActivityMetricsRequest *)request {
-    ACUISActivityItemMetricsRequest *lockScreen = request.lockScreenMetrics;
-    ACUISSizeDimensionRequest *width = lockScreen.widthRequest;
-    LSRDebugLog(@"activity metrics request: width %.1f..%.1f", width.minimum, width.maximum);
-    if (width && fabs(width.minimum - width.maximum) < 0.01) {
-        CGFloat wider = width.maximum + 2.0 * (kIOS16ListInset - kIOS15ListInset);
-        ACUISActivityMetricsRequest *adjusted = [request copy];
-        ACUISActivityItemMetricsRequest *adjustedLockScreen = [lockScreen copy];
-        adjustedLockScreen.widthRequest = [%c(ACUISSizeDimensionRequest) fixed:wider];
-        adjusted.lockScreenMetrics = adjustedLockScreen;
-        request = adjusted;
-    }
-    return %orig(descriptor, type, request);
-}
-%end
 
 // Card shape, measured on Apple's iOS 15 lock screen: 18.5pt corners (iOS 16: 23.5), and every
 // inner inset 4pt tighter — icon 10pt from the edges (iOS 16: 14), date 13pt from the right
@@ -1915,21 +1845,25 @@ static void LSRWallpaperPrefsChanged(CFNotificationCenterRef center, void *obser
 // On iOS 16 the lock screen player is a Live Activity: MediaRemoteUI draws it in its own scene
 // and SpringBoard only shows that scene inside a notification-list platter. MRUNowPlayingView
 // has context 2 there. Its iOS 16 layout (artwork + title in one row, time labels beside the
-// bar, AirPlay among the buttons, no volume) is replaced with iOS 15's, measured on Apple's
-// iOS 15 lock screen (all values in pt from the platter's top left, 390pt wide screen):
-//   artwork 100x100 at 16,16 (corner radius 3)
-//   text column from x 128: route ("iPhone") baseline 52, title baseline 70, subtitle 87.8
-//   AirPlay button centered 33.6 from the right edge, level with the artwork's center
-//   progress bar center y 138.2, 16 from both edges, 4 thick, 8pt knob; times baseline 157.8, 12pt
-//   buttons center y 191.1, 98 apart
-//   volume bar center y 244.6 from x 58 to 59.6 before the right edge, 24pt knob; speaker icons
-//   centered 37.6 / 37.3 from the edges
-//   platter height 281
+// bar, AirPlay among the buttons, no volume) is replaced with iOS 15's. iOS 16 no longer has
+// iOS 15's layout code (MRUNowPlayingControlsView is gone), so these are the frames of the
+// real thing: a view dump of the playing lock screen on iOS 15.8 (355pt wide platter), all in
+// pt from the platter's top left:
+//   platter 282 tall, content 16 in from every edge
+//   artwork 100x100 at 16,16 (corner radius 4), app icon 16x16, 8 in from its bottom right
+//   text column from x 128: route ("iPhone", Semibold 12) top 38, title (Semibold 17) top 52.5,
+//   subtitle (Regular 17) top 73; a label's baseline is its top plus the font's ascender
+//   AirPlay button 36x36, right edge 16 in, level with the artwork's center
+//   progress bar center y 138, 4 thick, 8pt knob; times Medium 11, top 147
+//   buttons 44x44, center y 191; five slots from 22 left of the content to 22 right of it
+//   (the outer two empty), so (content width + 44) / 4 apart
+//   volume bar center y 244 from x 60 to 60 before the right edge, 24pt knob; speaker icons
+//   20x20, centered 38 from the edges
 static const NSInteger kMRUContextCoverSheet = 2;
-static const CGFloat kIOS15PlayerHeight = 281.0;
+static const CGFloat kIOS15PlayerHeight = 282.0;
 static const CGFloat kIOS15PlayerInset = 16.0;
 static const CGFloat kIOS15ArtworkSize = 100.0;
-static const CGFloat kIOS15ArtworkCornerRadius = 3.0;
+static const CGFloat kIOS15ArtworkCornerRadius = 4.0;
 // The playing app's icon in the artwork's corner (MediaControls 15.6.1, MRUArtworkView
 // layoutSubviews, style 1): 16pt, 8pt in from the bottom right. iOS 16 dropped the icon view.
 static const CGFloat kIOS15AppIconSize = 16.0;
@@ -1937,20 +1871,21 @@ static const CGFloat kIOS15AppIconInset = 8.0;
 static const CGFloat kIOS15TextLeft = 128.0;
 static const CGFloat kIOS15HeaderTop = 40.0;
 static const CGFloat kIOS15HeaderHeight = 54.0;
-static const CGFloat kIOS15RoutingCenterFromRight = 33.6;
-static const CGFloat kIOS15RouteBaseline = 52.0;
-static const CGFloat kIOS15TitleBaseline = 70.0;
-static const CGFloat kIOS15SubtitleBaseline = 87.8;
-static const CGFloat kIOS15TimeBarCenterY = 138.2;
-static const CGFloat kIOS15TimeLabelBaseline = 157.8;
-static const CGFloat kIOS15TimeLabelFontSize = 12.0;
-static const CGFloat kIOS15TransportCenterY = 191.1;
-static const CGFloat kIOS15TransportSpacing = 98.0;
-static const CGFloat kIOS15VolumeCenterY = 244.6;
-static const CGFloat kIOS15VolumeBarLeft = 58.0;
-static const CGFloat kIOS15VolumeBarRightInset = 59.6;
-static const CGFloat kIOS15VolumeMinIconCenter = 37.6;
-static const CGFloat kIOS15VolumeMaxIconCenterFromRight = 37.3;
+static const CGFloat kIOS15RoutingCenterFromRight = 34.0;
+static const CGFloat kIOS15RouteBaseline = 49.4;
+static const CGFloat kIOS15TitleBaseline = 68.7;
+static const CGFloat kIOS15SubtitleBaseline = 89.2;
+static const CGFloat kIOS15TimeBarCenterY = 138.0;
+static const CGFloat kIOS15TimeLabelBaseline = 157.5;
+static const CGFloat kIOS15TimeLabelFontSize = 11.0;
+static const CGFloat kIOS15TransportCenterY = 191.0;
+// Button slots: (content width + this) / 4 apart.
+static const CGFloat kIOS15TransportSlotWidth = 44.0;
+static const CGFloat kIOS15VolumeCenterY = 244.0;
+static const CGFloat kIOS15VolumeBarLeft = 60.0;
+static const CGFloat kIOS15VolumeBarRightInset = 60.0;
+static const CGFloat kIOS15VolumeMinIconCenter = 38.0;
+static const CGFloat kIOS15VolumeMaxIconCenterFromRight = 38.0;
 static const CGFloat kIOS15SliderThickness = 4.0;
 static const CGFloat kIOS15TimeKnobSize = 8.0;
 static const CGFloat kIOS15VolumeKnobSize = 24.0;
@@ -2360,9 +2295,11 @@ static void LSRUpdateAppIcon(MRUNowPlayingViewController *controller) {
     if (!LSRLockScreenPlayerFor(self)) return;
     CGSize size = self.bounds.size;
     CGFloat centerX = size.width / 2.0, centerY = size.height / 2.0;
-    LSRSetCenter(self.leftButton, CGPointMake(centerX - kIOS15TransportSpacing, centerY));
+    // This view spans the platter; iOS 15's spanned the content.
+    CGFloat spacing = (size.width - 2.0 * kIOS15PlayerInset + kIOS15TransportSlotWidth) / 4.0;
+    LSRSetCenter(self.leftButton, CGPointMake(centerX - spacing, centerY));
     LSRSetCenter(self.centerButton, CGPointMake(centerX, centerY));
-    LSRSetCenter(self.rightButton, CGPointMake(centerX + kIOS15TransportSpacing, centerY));
+    LSRSetCenter(self.rightButton, CGPointMake(centerX + spacing, centerY));
     // Scales the glyph around the button's center without touching the button's frame.
     NSArray *buttons = @[self.leftButton ?: [NSNull null], self.centerButton ?: [NSNull null], self.rightButton ?: [NSNull null]];
     for (NSUInteger i = 0; i < buttons.count; i++) {
@@ -2422,7 +2359,7 @@ static void LSRBrightenSliderFill(MRUSlider *slider) {
 
 %end // LSRMediaPlayer
 
-// SpringBoard side: the platter around the player (and any other Live Activity) gets 13pt
+// SpringBoard side: the platter around the player (and any other Live Activity) gets 18pt
 // corners; iOS 16 uses 23.5 for the platter, its material
 // and the hosted scene view inside it.
 @interface NCNotificationListSupplementaryHostingView : UIView
