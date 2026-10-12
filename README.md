@@ -2,11 +2,6 @@
 
 Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player, unlock animation, live and dynamic wallpapers and the old **Settings → Wallpaper** page.
 
-> [!IMPORTANT]
-> **iPhones with Dynamic Island (iPhone 14 Pro, 14 Pro Max and newer) are not supported yet.** You can install it there, but nothing is optimized for the Dynamic Island, so expect things to look off.
->
-> **Feedback is very welcome:** if you try it on a different iPhone or iOS 16 version, please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot, even if everything looks right. That's how the [compatibility table](#compatibility) gets filled in.
-
 <p align="center">
   <img src="screenshots/lockscreen.png" width="200" alt="Lock screen with the iOS 15 clock, padlock and Focus pill">
   &nbsp;
@@ -14,202 +9,98 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
   &nbsp;
   <img src="screenshots/music.png" width="200" alt="iOS 15 music player with large artwork, app icon, AirPlay button and volume slider">
 </p>
-<p align="center"><sub>Lock screen · Notifications · Music player</sub></p>
 
-## Contents
-
-- [What it changes](#what-it-changes)
-- [Settings](#settings)
-- [Wallpapers](#wallpapers)
-- [Compatibility](#compatibility)
-- [Installation](#installation)
-- [Known limitations](#known-limitations)
-- [Building from source](#building-from-source)
-- [How positions are calculated](#how-positions-are-calculated)
+> [!NOTE]
+> This page describes **1.9.5 beta 5**. The stable version is 1.9.4; betas are on the [releases page](../../releases).
+> iPhones with a Dynamic Island (14 Pro and newer) are not supported yet.
 
 ## What it changes
 
-Every part has its own switch, so you can mix iOS 15 and iOS 16 however you like.
+Every part has its own switch, so you can mix iOS 15 and iOS 16.
 
-| Part | iOS 16 | With LockScreenRestore |
-|---|---|---|
-| Clock | Big bold clock, date above it, tinted | Thin iOS 15 clock, "Sunday, September 27" below it, plain white |
-| Padlock | Small, fades away after Face ID | Big, stays open after Face ID |
-| Focus | Name at the bottom of the screen | Pill under the date |
-| Notifications | Collected at the bottom, as a count, stack or list | Listed right under the clock, iOS 15 cards, always as a list |
-| Music player | Compact Live Activity | iOS 15 player with volume slider |
-| Charging | Battery drawn under the padlock | Battery where the clock is |
-| Unlock | Same blur on every unlock, home wallpaper static | iOS 15 transition: home wallpaper follows the swipe |
-| Wallpaper | Posters, no live or dynamic wallpapers | Live and Dynamic wallpapers, Perspective Zoom, iOS 15 wallpaper settings |
+### 🕘 Clock
+- Thin iOS 15 clock in iOS 15's own font, the date below it, plain white
+- Big padlock that stays open after Face ID
+- No depth effect and no lock screen widgets
+- The charging battery appears where the clock is
 
-### 🕘 iOS 15 Clock
+### 🌙 Focus
+- The Focus pill sits under the date instead of the Focus name at the bottom
 
-<img src="screenshots/lockscreen.png" width="180" align="right" alt="Lock screen">
+### 🔔 Notifications
+- Listed right under the clock, always as a list
+- iOS 15 card shape: 18.5 pt corners, tighter padding
+- **Notification Centre** and its ✕ only appear when you swipe up
 
-- Thin clock with the date **below** it, written out as "Sunday, September 27"
-- Plain white text instead of iOS 16's tinted, slightly see-through look
-- Big padlock that **stays open** after Face ID instead of shrinking away
-- No depth effect: the wallpaper no longer covers the clock
-- No lock screen widgets (iOS 15 had none)
-- When you plug in, the charging battery appears where the clock is, like on iOS 15
-- **iOS 15 unlock animation:** the home screen wallpaper follows your swipe with a little parallax, and the lock screen only blurs when lock and home screen have different wallpapers
-- Sizes and positions adapt to your iPhone's screen ([how](#how-positions-are-calculated))
+### 🎵 Music player
+- The iOS 15 layout with the sizes of iOS 15's player: large artwork with the app's icon, device name above the title, AirPlay next to it
+- Progress bar with a knob, bigger buttons and the **volume slider**
 
-### 🌙 iOS 15 Focus
+### 🔓 Unlock animation
+- The home screen wallpaper follows your swipe, and the lock screen only blurs when the two wallpapers differ
 
-- The Focus pill sits under the date (tap it to switch Focus), instead of the Focus name at the bottom of the screen
-
-<br clear="right">
-
-### 🔔 iOS 15 Notifications
-
-<img src="screenshots/notifications.png" width="180" align="right" alt="Notifications">
-
-- Notifications are listed **right under the clock** instead of collected at the bottom
-- iOS 15 card shape: smaller rounded corners (18.5 pt instead of 23.5 pt), tighter padding, one-line cards 58 pt tall instead of 66 pt
-- iOS 15's narrower side margins
-- Swipe up to see older notifications: the **Notification Centre** header with its ✕ button only appears then, like on iOS 15, and never flashes while unlocking
-
-<br clear="right">
-
-### 🎵 iOS 15 Music Player
-
-<img src="screenshots/music.png" width="180" align="right" alt="Music player">
-
-- The iOS 15 layout: large artwork, device name above the title, **AirPlay** next to the title
-- Progress bar with a knob and the times below it
-- Bigger play/pause, previous and next buttons
-- **Volume slider** (iOS 16 removed it from the lock screen)
-- "Artist — Album" under the title instead of only the artist
-- Tapping the artwork no longer switches the lock screen to iOS 16's full-screen album art
-
-<br clear="right">
-
-### 🖼️ iOS 15 Live Wallpaper
-
-- **Live wallpapers are back** (iOS 16 removed them): press and hold the lock screen to play
-- **Dynamic wallpapers are back**: the animated bubble wallpapers from iOS 15, in all their colors
-- **Perspective Zoom**: the wallpaper moves slightly as you tilt your iPhone (can be turned off in the wallpaper preview)
-- Switches automatically between the Light and Dark version with the system appearance
-- **Settings → Wallpaper is the iOS 15 page again:**
-  - *Choose a New Wallpaper*, a lock screen and a home screen preview side by side, and *Dark Appearance Dims Wallpaper*
-  - *Choose* shows **Dynamic · Stills · Live** at the top and your photo albums below
-  - Wallpapers show their Light and Dark version side by side, like on iOS 15
-  - Tap one to preview it, then **Set Lock Screen**, **Set Home Screen** or **Set Both**
-  - Photos keep **Move & Scale**; Live Photos play when you press and hold
-- Lock screen and home screen can have **different wallpapers**
-- Changes apply right away, no respring needed
-- Apple's iOS 14/15 wallpapers can be **downloaded right in Settings → Wallpaper**, see [Wallpapers](#wallpapers)
+### 🖼️ Wallpaper
+- **Live** wallpapers: press and hold the lock screen to play
+- **Dynamic** wallpapers: iOS 15's animated bubbles, drawn by iOS 15's own view
+- **Perspective Zoom** as on iOS 15, and a Light and a Dark version that follow the system appearance
+- Different wallpapers for the lock screen and the home screen
+- **Settings → Wallpaper** is the iOS 15 page again: *Choose a New Wallpaper* with Dynamic, Stills, Live and your photo albums, iOS's own preview with **Set Lock Screen / Home Screen / Both**, and *Dark Appearance Dims Wallpaper*
+- On iPhone Plus models the wallpaper turns with the home screen
 
 ## Settings
 
-**Settings → Tweaks → LockScreenRestore**
+**Settings → Tweaks → LockScreenRestore** has one switch per part (Clock, Focus, Notifications, Music Player, Unlock Animation, Live Wallpaper), all on by default, and:
 
-| Switch | Default | Off means |
-|---|---|---|
-| iOS 15 Clock | On | iOS 16 clock, date and padlock |
-| iOS 15 Focus | On | Focus at the bottom again |
-| iOS 15 Notifications | On | iOS 16 notification list |
-| iOS 15 Music Player | On | iOS 16 player |
-| iOS 15 Unlock Animation | On | iOS 16 unlock transition |
-| iOS 15 Live Wallpaper | On | iOS 16 wallpapers, lock screen editor and Settings → Wallpaper page |
+- **Clock Size**: 0.7 to 1.5 times iOS 15's size
+- **Fix Positions**: shows the detected iPhone and recalculates all positions
+- **Reset to Defaults**
 
-**Clock Size** (under iOS 15 Clock) scales the clock relative to iOS 15's size for your iPhone, from 0.7 to 1.5, if you'd like it bigger or smaller.
-
-Switches take effect after a respring: tap **Apply (Respring)** at the bottom of the page.
-
-**Fix Positions** shows which iPhone and screen size were detected and recalculates all positions with a respring. The tweak also does this by itself every time SpringBoard starts.
-
-**Reset to Defaults** turns every switch back on and resets Clock Size (your wallpapers stay).
-
-Wallpapers are picked in **Settings → Wallpaper**, not here.
-
-<br clear="right">
+Switches apply after **Apply (Respring)**. Wallpapers are picked in **Settings → Wallpaper**.
 
 ## Wallpapers
 
-Apple's wallpapers are copyrighted, so they're **not part of this repository or the package**. Instead, **Settings → Wallpaper → Choose a New Wallpaper → Stills / Live** lists them under **Available to Download**:
+Apple's wallpapers are copyrighted and not part of this repository or the package.
 
-1. Scroll down to **Available to Download** (wallpapers with a ☁️ icon).
-2. Tap one. It downloads the version made for your screen size and opens the preview.
-3. Tap **Set** and pick Lock Screen, Home Screen or Both.
+- **Stills and Live**: *Choose a New Wallpaper* lists Apple's iOS 14/15 wallpapers under **Available to Download** (from the [SniperGER/iOS-Wallpapers](https://github.com/SniperGER/iOS-Wallpapers) archive). Tap one to download it and open the preview.
+- **Dynamic**: no download, iOS 16 still ships them.
+- **Photos** from your library work too, with Move & Scale.
 
-The list comes from [SniperGER/iOS-Wallpapers](https://github.com/SniperGER/iOS-Wallpapers), an archive of Apple's official wallpapers: the iOS 14/15 live wallpapers (Orbs, Resonance, Light Beams, Twist) and stills like Desert, Lake, Earth, Flowers and WWDC. Each thumbnail downloads the full image once (1–5 MB), so use Wi-Fi when scrolling through the list the first time.
-
-**Photos** from your library work too, with Move & Scale.
-
-<details>
-<summary>Adding wallpapers by hand</summary>
-
-Each wallpaper is a folder with the still image and the video for Light and Dark:
-
-```
-/var/mobile/Library/LockScreenRestore/Wallpapers/
-└── Light Beams Blue/
-    ├── Light.heic
-    ├── Light.mov
-    ├── Dark.heic
-    └── Dark.mov
-```
-
-- The folder name is the name shown in Settings → Wallpaper.
-- With only `Light.heic` and `Dark.heic` it appears under **Stills**; with the `.mov` files too, it also appears under **Live**.
-
-</details>
-
-**Dynamic** wallpapers need no download: iOS 16 still ships them, the tweak just brings them back.
-
-If you'd rather keep iOS 16's wallpapers, turn **iOS 15 Live Wallpaper** off: that also brings back iOS 16's Settings → Wallpaper page and the lock screen editor.
+To add one by hand, put `Light.heic` and `Dark.heic` (plus `Light.mov` and `Dark.mov` for a live wallpaper) into a folder in `/var/mobile/Library/LockScreenRestore/Wallpapers/`. The folder's name is the wallpaper's name.
 
 ## Compatibility
 
-Rootless jailbreaks on **iOS 16 only**. Tested with Dopamine and ElleKit on iOS 16.1.1 and 16.5; other iOS 16 versions and jailbreaks are untested.
+Rootless jailbreaks on **iOS 16**. Tested with Dopamine on:
 
-| iPhone | Screen | Status |
-|---|---|---|
-| iPhone 13 Pro | 390 × 844 pt | ✅ Tested (iOS 16.1.1) |
-| iPhone 12 Pro | 390 × 844 pt | ✅ Tested (iOS 16.5) |
-| iPhone 12, 13, 14 | 390 × 844 pt | Should work (same screen as tested) |
-| iPhone X | 375 × 812 pt | ✅ Tested by a user (iOS 16.7) |
-| iPhone XS, 11 Pro, 12 mini, 13 mini | 375 × 812 pt | Should work (same screen as the iPhone X) |
-| iPhone 11 | 414 × 896 pt | ✅ Tested by a user (iOS 16.1) |
-| iPhone XR, XS Max, 11 Pro Max | 414 × 896 pt | Should work (same screen as the iPhone 11); XR clock position fixed in 1.9 |
-| iPhone 12 Pro Max, 13 Pro Max, 14 Plus | 428 × 926 pt | Supported, untested |
-| iPhone 14 Pro, 14 Pro Max | 393 / 430 pt, Dynamic Island | Not supported yet: installable, but not optimized for the Dynamic Island |
-| iPhone 8, 8 Plus, SE (2nd/3rd gen) | 375 / 414 pt, Touch ID | Supported, untested (clock size fixed after a report on 8 Plus) |
+- iPhone 13 Pro (iOS 16.1.1) and iPhone 12 Pro (iOS 16.5)
+- by users: iPhone X (iOS 16.7), iPhone 11 (iOS 16.1), iPhone 8 Plus (iOS 16.2)
 
-**Tested it on one of the untested iPhones?** Please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot of the lock screen, whether it looks right or not. Every report helps move a row to ✅.
+Other iPhones without a Dynamic Island get sizes and positions for their screen but are untested. If you try one, please [open an issue](../../issues) with your model, iOS version, jailbreak and a screenshot, even if everything looks right.
 
 ## Installation
 
-**Recommended:** add the repo to Sileo or Zebra and install LockScreenRestore from there. You'll get updates automatically.
+Add the repo to Sileo or Zebra and install LockScreenRestore:
 
 ```
 https://aronsz26.github.io/
 ```
 
-Or open [aronsz26.github.io](https://aronsz26.github.io/) on your iPhone and tap **Add to Sileo** / **Add to Zebra**.
+Or download the `.deb` from the [releases page](../../releases) and open it with Sileo, Zebra or Filza. PreferenceLoader is installed automatically.
 
-**Manually:** download the `.deb` from the [latest release](../../releases/latest) and open it with Sileo, Zebra or Filza.
-
-The package needs **PreferenceLoader**; your package manager installs it automatically if it's missing.
-
-**If something goes wrong:** the tweak runs in SpringBoard, the lock screen music player and Settings. If your iPhone lands in Safe Mode, turn the part that caused it off in the tweak's settings or uninstall the package, and please [open an issue](../../issues) with what you did right before.
+If your iPhone lands in Safe Mode, turn the part that caused it off in the tweak's settings or uninstall the package, and please [open an issue](../../issues).
 
 ## Known limitations
 
-- **No Dynamic Island support yet:** on iPhones with a Dynamic Island (iPhone 14 Pro and newer) the tweak installs, but it isn't optimized for them.
-- **Beta:** only tested on one iPhone and one iOS version (see [Compatibility](#compatibility)).
-- Downloadable wallpapers depend on the [SniperGER/iOS-Wallpapers](https://github.com/SniperGER/iOS-Wallpapers) archive being online.
-- The home screen preview in Settings → Wallpaper is a small screenshot of your home screen, taken when you unlock to it. After changing the home screen wallpaper it shows the wallpaper without icons until you unlock again. The screenshot stays on your iPhone (`/var/mobile/Library/LockScreenRestore/HomePreview.jpg`).
-- With **iOS 15 Live Wallpaper** on, the long press no longer opens iOS 16's lock screen editor.
-- Notification text follows **Settings → Display & Brightness → Text Size**. Apple's iOS 15 screenshots use the default size.
-- Some apps send their own text for the music player (Spotify Connect shows "Listening on …"); that text is shown as the app sends it.
-- Other tweaks that change the lock screen clock, padlock, notification list, music player or wallpaper may conflict.
+- No Dynamic Island support: the tweak installs there, but nothing is adjusted for it.
+- Landscape on Plus models is new; the direction of Perspective Zoom and of the bubbles' motion is untested there.
+- Live wallpapers play through the tweak's own player, not iOS 15's.
+- With Live Wallpaper on, the long press no longer opens iOS 16's lock screen editor.
+- The home screen preview in Settings → Wallpaper is a small screenshot taken when you unlock; it stays on your iPhone.
+- Downloads depend on the wallpaper archive being online.
+- Other tweaks that change the same parts of the lock screen may conflict.
 
-## Building from source
+## Building
 
-You need [Theos](https://theos.dev) and the iOS 16.5 SDK (included in `theos/sdks`).
+You need [Theos](https://theos.dev) and the iOS 16.5 SDK.
 
 ```bash
 git clone https://github.com/aronsz26/LockScreenRestore.git
@@ -218,39 +109,13 @@ export THEOS=~/theos
 make package FINALPACKAGE=1
 ```
 
-To install straight onto a device over SSH:
+`Tweak.xm` is the lock screen, `LSRWallpaperPane.xm` the Settings → Wallpaper page and `lockscreenrestoreprefs/` the tweak's settings. Without `FINALPACKAGE=1`, `DebugTools.m` is built in too: it inspects the running processes over SSH (see the comment at its top).
 
-```bash
-export THEOS_DEVICE_IP=<your iPhone's IP>
-make package FINALPACKAGE=1 install
-```
+## How it works
 
-| File | What's in it |
-|---|---|
-| [`Tweak.xm`](Tweak.xm) | Lock screen: clock, Focus, notifications, charging, music player, live wallpaper |
-| [`LSRWallpaperPane.xm`](LSRWallpaperPane.xm) | The iOS 15 Settings → Wallpaper page and the home screen preview |
-| [`lockscreenrestoreprefs/`](lockscreenrestoreprefs) | The tweak's own settings page |
-| [`DebugTools.m`](DebugTools.m) | Debug builds only, see below |
+iOS 16 still ships much of iOS 15, mostly for the iPad, and the tweak uses those parts where they exist: the bubbles view and the still wallpaper view with Perspective Zoom (`PBUIBokehWallpaperView`, `PBUIStaticWallpaperView`), the wallpaper preview (`SBSUIWallpaperPreviewViewController`), the clock's font and the unlock transition's settings.
 
-### Debug builds
-
-`make package` without `FINALPACKAGE=1` also compiles [`DebugTools.m`](DebugTools.m), which lets you inspect the running SpringBoard, music player or Settings over SSH: dump the view hierarchy, list a class's methods, or call a getter on a live object. The comment at the top of the file explains how. Release builds leave it out.
-
-## How positions are calculated
-
-The tweak works out every size and position each time SpringBoard starts, from values taken from iOS 15 itself, iOS 16's per-device lock screen measurements (`SBFLockScreenMetrics`) and ratios measured on Apple's iOS 15 lock screen:
-
-| Element | Source |
-|---|---|
-| Clock size | iOS 15's own size per screen: 70 pt (8, SE), 80 pt (X, XS, 11 Pro, 12, 13), 86 pt (8 Plus), 90 pt (XR, 11, Pro Max). iPhones iOS 15 never ran on (14 Pro): 0.8 × iOS 16's clock |
-| Clock and date position | iOS 15's own rule: status area + clock size, but at least 175 pt (Face ID), 154 pt (8 Plus) or 140 pt (8, SE); date 36 pt below the time |
-| Padlock position | 76 pt on Face ID iPhones, like iOS 15 |
-| Date size | iOS's own per-device value (`dateLabelFontSize`) |
-| Padlock size | iOS's own scale factor (`proudLockScaleFactor`) |
-| Focus pill position | fixed ratios to the clock size and the date, measured on iOS 15 |
-| Charging battery | centered on the clock and date |
-
-On Touch ID iPhones (iPhone 8, 8 Plus, SE) iOS draws the padlock differently, so the padlock part is the least certain there. Dynamic Island iPhones are not optimized yet (see above).
+Where iOS 16 has nothing left, like the music player's layout or the notification cards, the tweak adjusts iOS 16's views to the sizes read from a real iOS 15 lock screen. Clock size and position per iPhone follow iOS 15's own rules and are worked out each time SpringBoard starts.
 
 ## License
 
