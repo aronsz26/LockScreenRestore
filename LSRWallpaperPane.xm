@@ -1556,6 +1556,7 @@ static NSURL *LSRPreviewVideoURL(UIViewController *legacy) {
 
 @interface SBSUIWallpaperPreviewViewController (LSRSet)
 - (UIView *)_previewView;
+- (UIView *)_wallpaperView;
 - (void)setWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion;
 @end
 
@@ -1572,6 +1573,17 @@ static UIImage *LSRFramedPreviewImage(SBSUIWallpaperPreviewViewController *contr
 }
 
 %hook SBSUIWallpaperPreviewViewController
+// A Dynamic design: the preview only shows the gradient until its bokeh view is told to
+// animate (in SpringBoard the wallpaper controller did that).
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (!LSRIsBokehDesign(objc_getAssociatedObject(self, kLSRPreviewDesignKey))) return;
+    UIView *wallpaper = [self respondsToSelector:@selector(_wallpaperView)] ? [self _wallpaperView] : nil;
+    UIView *bokeh = [wallpaper isKindOfClass:NSClassFromString(@"PBUIBokehWallpaperView")] ? wallpaper
+        : LSRPaneFindSubview(self.view, NSClassFromString(@"PBUIBokehWallpaperView"));
+    LSRSetBokehAnimating(bokeh, YES);
+}
+
 - (void)setWallpaperForLocations:(NSInteger)locations completionHandler:(void (^)(void))completion {
     // Both screens are ours now (iOS 16 ignores this path for the home screen anyway).
     NSString *design = objc_getAssociatedObject(self, kLSRPreviewDesignKey);
