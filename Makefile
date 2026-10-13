@@ -14,7 +14,7 @@ TWEAK_NAME = LockScreenRestore
 
 LockScreenRestore_FILES = Tweak.xm LSRWallpaperPane.xm DebugTools.m
 LockScreenRestore_CFLAGS = -fobjc-arc
-LockScreenRestore_FRAMEWORKS = UIKit Foundation CoreText AVFoundation CoreMedia ImageIO
+LockScreenRestore_FRAMEWORKS = UIKit Foundation CoreText AVFoundation CoreMedia ImageIO CoreMotion
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

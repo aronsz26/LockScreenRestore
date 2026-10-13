@@ -17,6 +17,8 @@
 #import <CoreText/CoreText.h>
 #import <dlfcn.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreMotion/CoreMotion.h>
+#import <os/lock.h>
 #import "LSRBokeh.h"
 #import "LSRSim.h"
 
@@ -961,6 +963,8 @@ static BOOL sLSRPerspectiveZoom = YES;
 static const CGFloat kLSRPerspectiveMargin = 28.0;
 // "Dark Appearance Dims Wallpaper" (Settings > Wallpaper).
 static BOOL sLSRDimInDark = NO;
+// Posted when the wallpaper window changes between the lock screen and the home screen.
+static NSString *const kLSRShownScreenNotification = @"LSRShownScreen";
 // Posted in SpringBoard after Settings picked another design or toggled dimming.
 static NSString *const kLSRWallpaperReloadNotification = @"LSRWallpaperReload";
 static NSMutableDictionary<NSString *, UIImage *> *sLSRStillCache;
@@ -996,6 +1000,103 @@ static UIImage *LSRWallpaperStill(NSString *variant) {
 // What the wallpaper window shows right now.
 static NSString *LSRWindowDesignDir(void) {
     return !sLSRShowingLockScreen && sLSRHomeDesignDir ? sLSRHomeDesignDir : sLSRWallpaperDesignDir;
+}
+
+#pragma mark Dynamic wallpapers: iOS 15's motion
+
+// iOS 15's bubbles drift with the device: SBFBokehWallpaperView kept an SBFMotionManager, fed
+// gravity through a low-pass "inertia" filter 60 times a second and handed each bubble the
+// filter's change since the previous sample (-[SBFInfiniteImpulseResponseFilter
+// outputGradient]) as dx and dy. iOS 16's PBUIBokehWallpaperView dropped the manager and passes
+// 0, 0. This is that manager again, with iOS 15.5's numbers; the hooks further down pass its
+// values to the bubbles, whose own code still scales them (140x on the lock screen, 35x on the
+// home screen).
+typedef struct {
+    double feedforward[5];
+    double feedback[5];
+    double inputs[5];
+    double outputs[5];
+} LSRInertiaFilter;
+
+// +[SBFInfiniteImpulseResponseFilter lowpassInertiaFilterWithCoefficient:]
+static void LSRInertiaFilterInit(LSRInertiaFilter *filter, double coefficient) {
+    memset(filter, 0, sizeof(*filter));
+    const double feedforward[5] = { 1.0, -0.3, 0.5, 0.3, 0.15 };
+    for (int i = 0; i < 5; i++) filter->feedforward[i] = coefficient * feedforward[i];
+    filter->feedback[0] = 1.0;
+    filter->feedback[1] = coefficient - 1.0;
+    filter->feedback[2] = coefficient * 0.4;
+    filter->feedback[3] = coefficient * 0.15;
+    filter->feedback[4] = coefficient * 0.1;
+}
+
+// -[SBFInfiniteImpulseResponseFilter filterWithInput:]
+static void LSRInertiaFilterInput(LSRInertiaFilter *filter, double input) {
+    memmove(&filter->inputs[1], &filter->inputs[0], 4 * sizeof(double));
+    filter->inputs[0] = input;
+    double fed = 0.0, back = 0.0;
+    for (int i = 0; i < 5; i++) fed += filter->inputs[i] * filter->feedforward[i];
+    for (int i = 0; i < 4; i++) back += filter->outputs[i] * filter->feedback[i + 1];
+    double output = (fed - back) / filter->feedback[0];
+    memmove(&filter->outputs[1], &filter->outputs[0], 4 * sizeof(double));
+    filter->outputs[0] = output;
+}
+
+// SBFBokehWallpaperView made its manager with coefficient 0.99; device motion comes every 1/60s
+// in the "x arbitrary, z vertical" frame, and every 10s while paused.
+static const double kIOS15BokehMotionCoefficient = 0.99;
+static const NSTimeInterval kIOS15BokehMotionInterval = 1.0 / 60.0;
+static const NSTimeInterval kIOS15BokehMotionPausedInterval = 10.0;
+
+static CMMotionManager *sLSRBokehMotion = nil;
+static BOOL sLSRBokehMotionPaused = NO;
+static os_unfair_lock sLSRBokehMotionLock = OS_UNFAIR_LOCK_INIT;
+static LSRInertiaFilter sLSRBokehFilterX, sLSRBokehFilterY;
+static CFTimeInterval sLSRBokehLastTick = 0;
+// The values for the bubbles of the view being updated right now.
+static BOOL sLSRBokehUpdating = NO;
+static double sLSRBokehDX = 0.0, sLSRBokehDY = 0.0;
+
+static void LSRBokehMotionStart(void) {
+    if (sLSRBokehMotion) {
+        if (sLSRBokehMotionPaused) {
+            sLSRBokehMotion.deviceMotionUpdateInterval = kIOS15BokehMotionInterval;
+            sLSRBokehMotionPaused = NO;
+        }
+        return;
+    }
+    CMMotionManager *manager = [CMMotionManager new];
+    if (!manager.isDeviceMotionAvailable) return;
+    LSRInertiaFilterInit(&sLSRBokehFilterX, kIOS15BokehMotionCoefficient);
+    LSRInertiaFilterInit(&sLSRBokehFilterY, kIOS15BokehMotionCoefficient);
+    manager.deviceMotionUpdateInterval = kIOS15BokehMotionInterval;
+    NSOperationQueue *queue = [NSOperationQueue new];
+    queue.maxConcurrentOperationCount = 1;
+    [manager startDeviceMotionUpdatesUsingReferenceFrame:CMAttitudeReferenceFrameXArbitraryZVertical toQueue:queue
+                                             withHandler:^(CMDeviceMotion *motion, NSError *error) {
+        if (!motion) return;
+        CMAcceleration gravity = motion.gravity;
+        os_unfair_lock_lock(&sLSRBokehMotionLock);
+        LSRInertiaFilterInput(&sLSRBokehFilterX, gravity.x);
+        LSRInertiaFilterInput(&sLSRBokehFilterY, gravity.y);
+        os_unfair_lock_unlock(&sLSRBokehMotionLock);
+    }];
+    sLSRBokehMotion = manager;
+    sLSRBokehMotionPaused = NO;
+}
+
+// No bubbles were updated for a while (screen off, Low Power Mode, another wallpaper).
+static void LSRBokehMotionPauseIfIdle(void) {
+    if (!sLSRBokehMotion || sLSRBokehMotionPaused || CACurrentMediaTime() - sLSRBokehLastTick < 1.0) return;
+    sLSRBokehMotion.deviceMotionUpdateInterval = kIOS15BokehMotionPausedInterval;
+    sLSRBokehMotionPaused = YES;
+}
+
+static void LSRBokehMotionGradient(double *dx, double *dy) {
+    os_unfair_lock_lock(&sLSRBokehMotionLock);
+    *dx = sLSRBokehFilterX.outputs[0] - sLSRBokehFilterX.outputs[1];
+    *dy = sLSRBokehFilterY.outputs[0] - sLSRBokehFilterY.outputs[1];
+    os_unfair_lock_unlock(&sLSRBokehMotionLock);
 }
 
 // iOS 15's own wallpaper view for a still. iOS 16 still has it, renamed (SBFStaticWallpaperView
@@ -1130,6 +1231,8 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         [self addSubview:_dimView];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_reload)
                                                      name:kLSRWallpaperReloadNotification object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_applyShownScreen)
+                                                     name:kLSRShownScreenNotification object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_orientationChanged)
                                                      name:UIDeviceOrientationDidChangeNotification object:nil];
         [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
@@ -1257,6 +1360,16 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     [self _loadCurrentVariant];
 }
 
+// iOS 15's bubbles move four times as much on the lock screen as on the home screen: tell the
+// view which one it's on (wallpaper variant 0 or 1).
+- (void)_applyShownScreen {
+    SEL setVariant = NSSelectorFromString(@"setVariant:");
+    if (![_bokehView respondsToSelector:setVariant] || ![_bokehView respondsToSelector:NSSelectorFromString(@"variant")]) return;
+    long long wanted = sLSRShowingLockScreen ? 0 : 1;
+    long long current = ((long long (*)(id, SEL))objc_msgSend)(_bokehView, NSSelectorFromString(@"variant"));
+    if (current != wanted) ((void (*)(id, SEL, long long))objc_msgSend)(_bokehView, setVariant, wanted);
+}
+
 - (void)_loadCurrentVariant {
     NSString *variant = LSRWallpaperVariant(self.traitCollection);
     // Above the video too, so a playing wallpaper stays dimmed.
@@ -1280,6 +1393,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         LSRDebugLog(@"bokeh view %@", _bokehView);
         if (_bokehView) [_contentView insertSubview:_bokehView aboveSubview:_imageView];
         LSRSetBokehAnimating(_bokehView, YES);
+        [self _applyShownScreen];
         _imageView.image = _bokehView ? nil : LSRWallpaperStillIn(dir, variant);
         _videoURL = nil;
         [self setNeedsLayout];
@@ -1601,6 +1715,12 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
 @interface PBUIWallpaperView : UIView
 @end
 
+@interface PBUIBokehWallpaperView : PBUIWallpaperView
+@end
+
+@interface PBUIBokehWallpaperCircle : CALayer
+@end
+
 %group LSRWallpaper
 
 %hook _SBWallpaperSecureWindow
@@ -1620,6 +1740,53 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
     }
     if (!CGRectEqualToRect(view.frame, self.bounds)) view.frame = self.bounds;
     LSRPlaceCaptureCopy(self);
+}
+%end
+
+// Each display link tick moves the view's bubbles: give them iOS 15's dx and dy for it
+// (turned to the interface orientation by the view's own -_correctGyroValues:y:, and none
+// while the view rotates, as on iOS 15).
+%hook PBUIBokehWallpaperView
+- (void)_screenDidUpdate:(id)displayLink {
+    LSRBokehMotionStart();
+    sLSRBokehLastTick = CACurrentMediaTime();
+    double dx = 0.0, dy = 0.0;
+    BOOL rotating = [self respondsToSelector:@selector(isRotating)] && ((BOOL (*)(id, SEL))objc_msgSend)(self, @selector(isRotating));
+    SEL correct = NSSelectorFromString(@"_correctGyroValues:y:");
+    if (!rotating && [self respondsToSelector:correct]) {
+        LSRBokehMotionGradient(&dx, &dy);
+        ((void (*)(id, SEL, double *, double *))objc_msgSend)(self, correct, &dx, &dy);
+    }
+#ifdef DEBUG
+    static NSUInteger ticks = 0;
+    if (++ticks % 60 == 0) {
+        LSRDebugLog(@"bokeh motion: dx %.5f dy %.5f, filtered gravity %.3f %.3f, variant %lld", dx, dy,
+            sLSRBokehFilterX.outputs[0], sLSRBokehFilterY.outputs[0],
+            ((long long (*)(id, SEL))objc_msgSend)(self, NSSelectorFromString(@"variant")));
+    }
+#endif
+    sLSRBokehDX = dx;
+    sLSRBokehDY = dy;
+    sLSRBokehUpdating = YES;
+    %orig;
+    sLSRBokehUpdating = NO;
+}
+
+- (void)_destroyDisplayLink {
+    %orig;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LSRBokehMotionPauseIfIdle();
+    });
+}
+%end
+
+%hook PBUIBokehWallpaperCircle
+- (void)updatePositionWithTime:(double)time dx:(double)dx dy:(double)dy lockScreen:(BOOL)lockScreen {
+    if (sLSRBokehUpdating) {
+        %orig(time, sLSRBokehDX, sLSRBokehDY, lockScreen);
+        return;
+    }
+    %orig;
 }
 %end
 
@@ -1665,6 +1832,7 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
     if (sLSRShowingLockScreen) return;
     sLSRShowingLockScreen = YES;
     if (sLSRHomeDesignDir) [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLSRShownScreenNotification object:nil];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -1672,6 +1840,7 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
     if (!sLSRShowingLockScreen) return;
     sLSRShowingLockScreen = NO;
     if (sLSRHomeDesignDir) [[NSNotificationCenter defaultCenter] postNotificationName:kLSRWallpaperReloadNotification object:nil];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLSRShownScreenNotification object:nil];
 }
 
 - (void)_setupPosterSwitcherGestureRecognizer {
