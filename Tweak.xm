@@ -1002,6 +1002,90 @@ static NSString *LSRWindowDesignDir(void) {
     return !sLSRShowingLockScreen && sLSRHomeDesignDir ? sLSRHomeDesignDir : sLSRWallpaperDesignDir;
 }
 
+#pragma mark Rotation report (issue #7)
+
+// For a tester with an iPhone we don't have: with the file "lsr-rotation-report" in
+// /var/mobile/Documents, each turn of the iPhone writes how the wallpaper window and the dock's
+// blur are layered, a few times while the home screen rotates (class names and sizes only, no
+// app names, no content). Nothing is written without that file.
+@interface UIWindow (LSRAllWindows)
++ (NSArray *)allWindowsIncludingInternalWindows:(BOOL)includeInternal onlyVisibleWindows:(BOOL)onlyVisible;
+@end
+
+static NSString *LSRLayerOwner(CALayer *layer) {
+    return layer.delegate ? NSStringFromClass([(id)layer.delegate class]) : @"-";
+}
+
+static void LSRReportLayers(CALayer *layer, NSUInteger depth, BOOL everything, NSMutableString *out) {
+    BOOL backdrop = [layer isKindOfClass:NSClassFromString(@"CABackdropLayer")];
+    if (everything || backdrop) {
+        NSMutableString *line = [NSMutableString string];
+        for (NSUInteger i = 0; i < (everything ? depth : 1); i++) [line appendString:@"  "];
+        CGAffineTransform t = layer.affineTransform;
+        [line appendFormat:@"%@ view=%@ frame=%@ hidden=%d opacity=%.2f", NSStringFromClass([layer class]),
+            LSRLayerOwner(layer), NSStringFromCGRect(layer.frame), layer.hidden, layer.opacity];
+        if (!CGAffineTransformIsIdentity(t)) [line appendFormat:@" transform=[%.2f %.2f %.2f %.2f]", t.a, t.b, t.c, t.d];
+        if (backdrop) {
+            @try {
+                [line appendFormat:@" GROUP=%@ namespace=%@ captureOnly=%@ scale=%@ enabled=%@", [layer valueForKey:@"groupName"],
+                    [layer valueForKey:@"groupNamespace"], [layer valueForKey:@"captureOnly"], [layer valueForKey:@"scale"],
+                    [layer valueForKey:@"enabled"]];
+            } @catch (id e) {}
+            if (!everything) {
+                NSMutableArray *path = [NSMutableArray new];
+                for (CALayer *up = layer.superlayer; up; up = up.superlayer) {
+                    if (up.delegate) [path addObject:LSRLayerOwner(up)];
+                }
+                [line appendFormat:@" < %@", [path componentsJoinedByString:@" < "]];
+            }
+        }
+        [out appendFormat:@"%@\n", line];
+    }
+    for (CALayer *sub in layer.sublayers) LSRReportLayers(sub, depth + 1, everything, out);
+}
+
+// The dock with everything inside it except the icons.
+static void LSRReportDock(UIView *view, NSMutableString *out) {
+    if ([view isKindOfClass:NSClassFromString(@"SBDockView")]) {
+        [out appendFormat:@"--- dock, edge %@\n", [view valueForKey:@"dockEdge"]];
+        for (UIView *sub in view.subviews) {
+            if ([NSStringFromClass([sub class]) containsString:@"IconListView"]) continue;
+            [out appendFormat:@"  background color of %@: %@\n", NSStringFromClass([sub class]), sub.backgroundColor];
+            LSRReportLayers(sub.layer, 2, YES, out);
+        }
+        return;
+    }
+    for (UIView *sub in view.subviews) LSRReportDock(sub, out);
+}
+
+static void LSRWriteRotationReport(NSString *moment) {
+    NSMutableString *out = [NSMutableString string];
+    [out appendFormat:@"LockScreenRestore rotation report, %@s after the turn\niOS %@, screen %@, scale %.0f\n\n", moment,
+        [UIDevice currentDevice].systemVersion, NSStringFromCGRect([UIScreen mainScreen].bounds), [UIScreen mainScreen].scale];
+    for (UIWindow *window in [UIWindow allWindowsIncludingInternalWindows:YES onlyVisibleWindows:NO]) {
+        NSString *name = NSStringFromClass([window class]);
+        BOOL wallpaper = [name containsString:@"Wallpaper"];
+        BOOL home = [name isEqualToString:@"SBHomeScreenWindow"];
+        if (!wallpaper && !home) continue;
+        [out appendFormat:@"##### %@ level=%.0f hidden=%d bounds=%@\n", name, window.windowLevel, window.hidden,
+            NSStringFromCGRect(window.bounds)];
+        LSRReportLayers(window.layer, 0, wallpaper, out);
+        if (home) LSRReportDock(window, out);
+        [out appendString:@"\n"];
+    }
+    NSString *file = [NSString stringWithFormat:@"/var/mobile/Documents/LockScreenRestore-rotation-%@.txt", moment];
+    [out writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+static void LSRScheduleRotationReports(void) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-rotation-report"]) return;
+    for (NSString *moment in @[@"0.00", @"0.10", @"0.25", @"0.50", @"1.50"]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(moment.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            LSRWriteRotationReport(moment);
+        });
+    }
+}
+
 #pragma mark Dynamic wallpapers: iOS 15's motion
 
 // iOS 15's bubbles drift with the device: SBFBokehWallpaperView kept an SBFMotionManager, fed
@@ -1313,6 +1397,7 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
 - (void)_orientationChanged {
     [self setNeedsLayout];
     [self.window setNeedsLayout];
+    if ([self.superview isKindOfClass:NSClassFromString(@"_SBWallpaperSecureWindow")]) LSRScheduleRotationReports();
     // The window may finish turning after the notification.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self setNeedsLayout];

@@ -11,7 +11,7 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
 </p>
 
 > [!NOTE]
-> This page describes **1.9.5 beta 5**. The stable version is 1.9.4; betas are on the [releases page](../../releases).
+> This page describes **1.9.5 beta 6**. The stable version is 1.9.4; betas are on the [releases page](../../releases).
 > iPhones with a Dynamic Island (14 Pro and newer) are not supported yet.
 
 ## What it changes
