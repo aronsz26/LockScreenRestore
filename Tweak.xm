@@ -1038,6 +1038,12 @@ static UIImage *LSRAppleSizedStill(UIImage *still, BOOL perspective) {
     return sized;
 }
 
+// iOS 16 kept the view's Perspective Zoom but switched its motion off:
+// -[PBUIWallpaperView _isParallaxMotionEnabled] just returns NO there (iOS 15 had no such
+// check), so the image has its overhang and never moves. Our views get it back.
+static const void *const kLSRParallaxMotionKey = &kLSRParallaxMotionKey;
+static BOOL sLSRBuildingStaticView = NO;
+
 static UIView *LSRLegacyStaticView(UIImage *still, NSString *name, CGRect frame, BOOL perspective) {
     // Test switch: back to our own image view.
     if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-no-legacy-static"]) return nil;
@@ -1065,8 +1071,12 @@ static UIView *LSRLegacyStaticView(UIImage *still, NSString *name, CGRect frame,
     // The view keeps its treated image in iOS's wallpaper cache under this name, and takes
     // whatever is there: one name per image and size.
     NSString *cacheGroup = [NSString stringWithFormat:@"LockScreenRestore-%@-%.0fx%.0f", name, sized.size.width, sized.size.height];
-    return ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
+    sLSRBuildingStaticView = YES;
+    UIView *view = ((id (*)(id, SEL, CGRect, id, long long, id, id, unsigned long long))objc_msgSend)(
         [viewClass alloc], viewInit, frame, configuration, 0, cacheGroup, nil, 0);
+    sLSRBuildingStaticView = NO;
+    if (view) objc_setAssociatedObject(view, kLSRParallaxMotionKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return view;
 }
 
 @interface LSRLiveWallpaperView : UIView
@@ -1285,6 +1295,10 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     _staticView = LSRLegacyStaticView(still, stillName, _contentView.bounds, sLSRPerspectiveZoom);
     LSRDebugLog(@"static view %@", _staticView);
     if (_staticView) [_contentView insertSubview:_staticView aboveSubview:_imageView];
+    // Now that it's on screen and marked as ours: let it set up its motion.
+    if ([_staticView respondsToSelector:NSSelectorFromString(@"_updateParallax")]) {
+        ((void (*)(id, SEL))objc_msgSend)(_staticView, NSSelectorFromString(@"_updateParallax"));
+    }
     _imageView.image = _staticView ? nil : still;
     _videoURL = dir ? [NSURL fileURLWithPath:[[dir stringByAppendingPathComponent:variant] stringByAppendingPathExtension:@"mov"]] : nil;
     [self stopVideo];
@@ -1584,6 +1598,9 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
 @interface MTMaterialView : UIView
 @end
 
+@interface PBUIWallpaperView : UIView
+@end
+
 %group LSRWallpaper
 
 %hook _SBWallpaperSecureWindow
@@ -1603,6 +1620,13 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
     }
     if (!CGRectEqualToRect(view.frame, self.bounds)) view.frame = self.bounds;
     LSRPlaceCaptureCopy(self);
+}
+%end
+
+%hook PBUIWallpaperView
+- (BOOL)_isParallaxMotionEnabled {
+    if (sLSRBuildingStaticView || objc_getAssociatedObject(self, kLSRParallaxMotionKey)) return YES;
+    return %orig;
 }
 %end
 
