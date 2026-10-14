@@ -1006,8 +1006,10 @@ static NSString *LSRWindowDesignDir(void) {
 
 // For a tester with an iPhone we don't have: with the file "lsr-rotation-report" in
 // /var/mobile/Documents, each turn of the iPhone writes how the wallpaper window and the dock's
-// blur are layered, a few times while the home screen rotates (class names and sizes only, no
+// blur are layered, every 50 ms while the home screen rotates (class names and sizes only, no
 // app names, no content). Nothing is written without that file.
+// The layers' own values jump to the end of a turn at once; what is on screen meanwhile is in
+// their presentation layers, so the report shows those, and the animations running on each.
 @interface UIWindow (LSRAllWindows)
 + (NSArray *)allWindowsIncludingInternalWindows:(BOOL)includeInternal onlyVisibleWindows:(BOOL)onlyVisible;
 @end
@@ -1017,14 +1019,29 @@ static NSString *LSRLayerOwner(CALayer *layer) {
 }
 
 static void LSRReportLayers(CALayer *layer, NSUInteger depth, BOOL everything, NSMutableString *out) {
+    // The bubbles and the video player's insides are many lines and tell nothing here.
+    NSString *className = NSStringFromClass([layer class]);
+    if ([className hasPrefix:@"PBUIBokehWallpaperCircle"] || [className hasPrefix:@"Fig"]) return;
     BOOL backdrop = [layer isKindOfClass:NSClassFromString(@"CABackdropLayer")];
     if (everything || backdrop) {
         NSMutableString *line = [NSMutableString string];
         for (NSUInteger i = 0; i < (everything ? depth : 1); i++) [line appendString:@"  "];
-        CGAffineTransform t = layer.affineTransform;
-        [line appendFormat:@"%@ view=%@ frame=%@ hidden=%d opacity=%.2f", NSStringFromClass([layer class]),
-            LSRLayerOwner(layer), NSStringFromCGRect(layer.frame), layer.hidden, layer.opacity];
+        CALayer *shown = layer.presentationLayer ?: layer;
+        CGAffineTransform t = shown.affineTransform;
+        [line appendFormat:@"%@ view=%@ frame=%@ hidden=%d opacity=%.2f", className,
+            LSRLayerOwner(layer), NSStringFromCGRect(shown.frame), shown.hidden, shown.opacity];
         if (!CGAffineTransformIsIdentity(t)) [line appendFormat:@" transform=[%.2f %.2f %.2f %.2f]", t.a, t.b, t.c, t.d];
+        if (!CATransform3DIsIdentity(shown.sublayerTransform)) [line appendString:@" sublayerTransform"];
+        NSArray *animations = layer.animationKeys;
+        if (animations.count) {
+            NSMutableArray *paths = [NSMutableArray new];
+            for (NSString *key in animations) {
+                CAAnimation *animation = [layer animationForKey:key];
+                NSString *path = [animation isKindOfClass:[CAPropertyAnimation class]] ? ((CAPropertyAnimation *)animation).keyPath : nil;
+                [paths addObject:path ?: key];
+            }
+            [line appendFormat:@" ANIMATING=%@", [paths componentsJoinedByString:@","]];
+        }
         if (backdrop) {
             @try {
                 [line appendFormat:@" GROUP=%@ namespace=%@ captureOnly=%@ scale=%@ enabled=%@", [layer valueForKey:@"groupName"],
@@ -1058,30 +1075,36 @@ static void LSRReportDock(UIView *view, NSMutableString *out) {
     for (UIView *sub in view.subviews) LSRReportDock(sub, out);
 }
 
-static void LSRWriteRotationReport(NSString *moment) {
-    NSMutableString *out = [NSMutableString string];
-    [out appendFormat:@"LockScreenRestore rotation report, %@s after the turn\niOS %@, screen %@, scale %.0f\n\n", moment,
+static void LSRWriteRotationReport(NSString *moment, NSMutableString *out) {
+    [out appendFormat:@"========== %@s after the turn: iOS %@, screen %@, scale %.0f\n\n", moment,
         [UIDevice currentDevice].systemVersion, NSStringFromCGRect([UIScreen mainScreen].bounds), [UIScreen mainScreen].scale];
     for (UIWindow *window in [UIWindow allWindowsIncludingInternalWindows:YES onlyVisibleWindows:NO]) {
         NSString *name = NSStringFromClass([window class]);
         BOOL wallpaper = [name containsString:@"Wallpaper"];
         BOOL home = [name isEqualToString:@"SBHomeScreenWindow"];
         if (!wallpaper && !home) continue;
-        [out appendFormat:@"##### %@ level=%.0f hidden=%d bounds=%@\n", name, window.windowLevel, window.hidden,
-            NSStringFromCGRect(window.bounds)];
+        // How far the window is turned on screen (0 in portrait).
+        CGPoint origin = [window convertPoint:CGPointZero toCoordinateSpace:window.screen.coordinateSpace];
+        CGPoint unitX = [window convertPoint:CGPointMake(1, 0) toCoordinateSpace:window.screen.coordinateSpace];
+        [out appendFormat:@"##### %@ level=%.0f hidden=%d bounds=%@ turned=%.0f\n", name, window.windowLevel, window.hidden,
+            NSStringFromCGRect(window.bounds), atan2(unitX.y - origin.y, unitX.x - origin.x) * 180.0 / M_PI];
         LSRReportLayers(window.layer, 0, wallpaper, out);
         if (home) LSRReportDock(window, out);
         [out appendString:@"\n"];
     }
-    NSString *file = [NSString stringWithFormat:@"/var/mobile/Documents/LockScreenRestore-rotation-%@.txt", moment];
-    [out writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [out writeToFile:@"/var/mobile/Documents/LockScreenRestore-rotation.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 static void LSRScheduleRotationReports(void) {
     if (![[NSFileManager defaultManager] fileExistsAtPath:@"/var/mobile/Documents/lsr-rotation-report"]) return;
-    for (NSString *moment in @[@"0.00", @"0.10", @"0.25", @"0.50", @"1.50"]) {
+    // One file per turn, a section every 50 ms for a second and one after 1.5 s.
+    NSMutableString *out = [NSMutableString stringWithString:@"LockScreenRestore rotation report\n\n"];
+    NSMutableArray<NSNumber *> *moments = [NSMutableArray new];
+    for (int i = 0; i <= 20; i++) [moments addObject:@(i * 0.05)];
+    [moments addObject:@1.5];
+    for (NSNumber *moment in moments) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(moment.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            LSRWriteRotationReport(moment);
+            LSRWriteRotationReport([NSString stringWithFormat:@"%.2f", moment.doubleValue], out);
         });
     }
 }
