@@ -19,11 +19,12 @@ details = [
         "🌙 **Focus** – the Focus pill under the date\n\n"
         "🔓 **Unlock animation** – the iOS 15 transition to the home screen\n\n"
         "🖼️ **Wallpapers** – Live and Dynamic wallpapers are back, Perspective Zoom, and the iOS 15 Settings → Wallpaper page with Apple's iOS 14/15 wallpapers to download\n\n"
+        "🏠 **Home screen** – the lighter iOS 15 shadow under the app names\n\n"
         "🔋 **Charging** – the battery appears where the clock is"},
     {"class": "DepictionHeaderView", "title": "Good to know"},
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "Sizes and positions are calculated for every iPhone from iOS 15's own values. "
-        "This is a **beta**: feedback and screenshots from other iPhones are very welcome on GitHub. "
+        "Feedback and screenshots from other iPhones are very welcome on GitHub. "
         "iPads aren't supported. **iPhones with a Dynamic Island (14 Pro and newer) aren't optimized yet**: you can install it there, but it may look off."},
     {"class": "DepictionSeparatorView"},
     {"class": "DepictionTableTextView", "title": "Compatibility", "text": "iOS 16 · rootless"},
@@ -32,6 +33,12 @@ details = [
     {"class": "DepictionTableButtonView", "title": "Report a problem", "action": "https://github.com/aronsz26/LockScreenRestore/issues", "openExternal": True},
 ]
 changelog = [
+    {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
+        "**1.9.5**\n- Dynamic wallpapers and stills are drawn by iOS 15's own views again, with iOS 15's motion and Perspective Zoom\n"
+        "- The lighter iOS 15 shadow under the app names (new switch)\n"
+        "- iOS 15 sizes for notification cards and the music player, and iOS 15's own clock font\n"
+        "- Settings → Wallpaper opens iOS's own preview with Cancel and Set\n"
+        "- iPhone Plus models: the wallpaper turns with the home screen in landscape, and the dock blurs the right wallpaper"},
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "**1.9.4**\n- Music player: a tap on the artwork opens the playing app, like iOS 15\n- Date size follows Text Size like iOS 15\n"
         "- Date keeps iOS 15's font (was too big on iPhone 8)\n- Focus pill sits 19 pt below the date like iOS 15 and can be tapped"},

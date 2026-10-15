@@ -11,7 +11,6 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
 </p>
 
 > [!NOTE]
-> This page describes **1.9.5 beta 7**. The stable version is 1.9.4; betas are on the [releases page](../../releases).
 > iPhones with a Dynamic Island (14 Pro and newer) are not supported yet.
 
 ## What it changes
@@ -95,6 +94,7 @@ If your iPhone lands in Safe Mode, turn the part that caused it off in the tweak
 
 - No Dynamic Island support: the tweak installs there, but nothing is adjusted for it.
 - Landscape on Plus models is new; the direction of Perspective Zoom and of the bubbles' motion is untested there.
+- On iPhones with a home button, the dock can briefly show iOS's own wallpaper while the home screen rotates; it is right again once the turn is done.
 - Live wallpapers play through the tweak's own player, not iOS 15's.
 - With Live Wallpaper on, the long press no longer opens iOS 16's lock screen editor.
 - The home screen preview in Settings → Wallpaper is a small screenshot taken when you unlock; it stays on your iPhone.
