@@ -2682,6 +2682,92 @@ static void LSRApplyIOS15Transitions(id settings) {
 
 %end // LSRUnlock
 
+#pragma mark - Icon label shadows (iOS 15)
+
+// iOS 16 draws the shadow under the home screen icon names with a new SpringBoard engine
+// (SBUILegibilityDefaultEngine), which comes out much darker than iOS 15's. iOS 15 made it in
+// +[SBIconLabelImage legibilityImageForIconLabelImage:parameters:pool:]: UIKit's
+// -_drawImageForLegibilitySettings:strength:size:alphaOnly: with a white-shadow settings object,
+// at scale 1, in an image of +[UIImage _legibilityImageSizeForSize:style:]. iOS 16 dropped that
+// method but kept everything it calls, and the strength (0.3) is the same. When iOS 16 hands an
+// icon label its shadow, it gets the one iOS 15's way makes instead.
+@interface UIImage (LSRLegibility)
++ (CGSize)_legibilityImageSizeForSize:(CGSize)size style:(long long)style;
+- (void)_drawImageForLegibilitySettings:(id)settings strength:(double)strength size:(CGSize)size alphaOnly:(BOOL)alphaOnly;
+@end
+
+@interface _UILegibilitySettings : NSObject
+- (instancetype)initWithStyle:(long long)style primaryColor:(UIColor *)primary secondaryColor:(UIColor *)secondary shadowColor:(UIColor *)shadow;
+@end
+
+@interface SBIconLabelImageParameters : NSObject
+@property (readonly, nonatomic) long long legibilityStyle;
+@end
+
+@interface SBIconLegibilityLabelView : UIView
+@property (retain, nonatomic) SBIconLabelImageParameters *imageParameters;
+@property (retain, nonatomic) UIImage *image;
+@end
+
+@interface SBUILegibilityShadowView : UIView
+@end
+
+static const void *const kLSRIOS15LabelShadowKey = &kLSRIOS15LabelShadowKey;
+
+static UIImage *LSRIOS15LabelShadow(UIView *shadowView) {
+    UIView *label = shadowView.superview;
+    while (label && ![label isKindOfClass:NSClassFromString(@"SBIconLegibilityLabelView")]) label = label.superview;
+    if (!label) return nil;
+    UIImage *text = ((SBIconLegibilityLabelView *)label).image;
+    SBIconLabelImageParameters *parameters = ((SBIconLegibilityLabelView *)label).imageParameters;
+    if (!text || !parameters) return nil;
+    long long style = parameters.legibilityStyle;
+    // Made once per label image (iOS 15 kept it on the label image too).
+    NSString *cacheKey = [NSString stringWithFormat:@"%lld", style];
+    NSDictionary *cached = objc_getAssociatedObject(text, kLSRIOS15LabelShadowKey);
+    if (cached[cacheKey]) return cached[cacheKey];
+    Class labelImageClass = NSClassFromString(@"SBIconLabelImage");
+    SEL strengthSel = NSSelectorFromString(@"legibilityStrengthForLegibilityStyle:");
+    SEL drawSel = @selector(_drawImageForLegibilitySettings:strength:size:alphaOnly:);
+    SEL contextSel = NSSelectorFromString(@"sbf_imageFromContextWithSize:scale:type:pool:drawing:");
+    if (![labelImageClass respondsToSelector:strengthSel] || ![text respondsToSelector:drawSel]
+        || ![UIImage respondsToSelector:@selector(_legibilityImageSizeForSize:style:)] || ![UIImage respondsToSelector:contextSel]) {
+        return nil;
+    }
+    double strength = ((double (*)(id, SEL, long long))objc_msgSend)(labelImageClass, strengthSel, style);
+    // iOS 15 had no shadow at all for this style (strength 0): leave iOS 16's.
+    if (strength <= 0.0) return nil;
+    CGSize size = [UIImage _legibilityImageSizeForSize:text.size style:style];
+    if (size.width <= 0.0 || size.height <= 0.0) return nil;
+    _UILegibilitySettings *settings = [[NSClassFromString(@"_UILegibilitySettings") alloc] initWithStyle:style
+        primaryColor:nil secondaryColor:nil shadowColor:[UIColor whiteColor]];
+    void (^drawing)(void) = ^{
+        [text _drawImageForLegibilitySettings:settings strength:strength size:size alphaOnly:YES];
+    };
+    UIImage *shadow = ((UIImage *(*)(id, SEL, CGSize, double, long long, id, id))objc_msgSend)([UIImage class], contextSel,
+        size, 1.0, 4, nil, drawing);
+    if (!shadow) return nil;
+    NSMutableDictionary *store = cached ? [cached mutableCopy] : [NSMutableDictionary new];
+    store[cacheKey] = shadow;
+    objc_setAssociatedObject(text, kLSRIOS15LabelShadowKey, store, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return shadow;
+}
+
+%group LSRIconLabels
+
+%hook SBUILegibilityShadowView
+- (void)setImage:(UIImage *)image strengthenedImage:(UIImage *)strengthenedImage strength:(double)strength {
+    UIImage *ios15 = image ? LSRIOS15LabelShadow(self) : nil;
+    if (ios15) {
+        %orig(ios15, ios15, strength);
+        return;
+    }
+    %orig;
+}
+%end
+
+%end // LSRIconLabels
+
 #pragma mark - Settings
 
 // Missing file/key = never touched in Settings = on (the default).
@@ -2723,6 +2809,7 @@ static BOOL LSRPrefEnabled(NSDictionary *prefs, NSString *key) {
     if (LSRPrefEnabled(prefs, @"notificationsEnabled")) %init(LSRNotifications);
     if (LSRPrefEnabled(prefs, @"mediaPlayerEnabled")) %init(LSRMediaPlatter);
     if (LSRPrefEnabled(prefs, @"unlockAnimationEnabled") && NSClassFromString(@"CSCoverSheetTransitionsSettings")) %init(LSRUnlock);
+    if (LSRPrefEnabled(prefs, @"iconLabelShadowEnabled") && NSClassFromString(@"SBUILegibilityShadowView")) %init(LSRIconLabels);
     if (LSRPrefEnabled(prefs, @"liveWallpaperEnabled")) {
         sLSRWallpaperDesignDir = LSRResolveWallpaperDesignDir(prefs);
         sLSRHomeDesignDir = LSRResolveHomeDesignDir(prefs);

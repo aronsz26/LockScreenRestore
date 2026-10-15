@@ -124,6 +124,24 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
+			<string>The lighter iOS 15 shadow under the app names on the home screen. iOS 16 draws it much darker.</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>label</key>
+			<string>iOS 15 Icon Label Shadows</string>
+			<key>key</key>
+			<string>iconLabelShadowEnabled</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.aronsz26.lockscreenrestore</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
 			<string>iOS 15 live wallpapers with automatic Light/Dark switching, and the iOS 15 page in Settings &gt; Wallpaper to pick them (or a photo) for the lock and home screen. Apple's iOS 14 and 15 wallpapers can be downloaded right there. Press and hold the lock screen to play. Turn this off to get iOS 16's wallpapers and lock screen editor back.</string>
 		</dict>
 		<dict>
