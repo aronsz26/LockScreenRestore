@@ -11,7 +11,7 @@ Brings the iOS 15 lock screen back to iOS 16: clock, notifications, music player
 </p>
 
 > [!NOTE]
-> This page describes **1.9.5 beta 6**. The stable version is 1.9.4; betas are on the [releases page](../../releases).
+> This page describes **1.9.5 beta 7**. The stable version is 1.9.4; betas are on the [releases page](../../releases).
 > iPhones with a Dynamic Island (14 Pro and newer) are not supported yet.
 
 ## What it changes
@@ -47,9 +47,12 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16.
 - **Settings → Wallpaper** is the iOS 15 page again: *Choose a New Wallpaper* with Dynamic, Stills, Live and your photo albums, iOS's own preview with **Set Lock Screen / Home Screen / Both**, and *Dark Appearance Dims Wallpaper*
 - On iPhone Plus models the wallpaper turns with the home screen
 
+### 🏠 Home screen
+- The lighter iOS 15 shadow under the app names (iOS 16 draws it much darker)
+
 ## Settings
 
-**Settings → Tweaks → LockScreenRestore** has one switch per part (Clock, Focus, Notifications, Music Player, Unlock Animation, Live Wallpaper), all on by default, and:
+**Settings → Tweaks → LockScreenRestore** has one switch per part (Clock, Focus, Notifications, Music Player, Unlock Animation, Icon Label Shadows, Live Wallpaper), all on by default, and:
 
 - **Clock Size**: 0.7 to 1.5 times iOS 15's size
 - **Fix Positions**: shows the detected iPhone and recalculates all positions
@@ -113,7 +116,7 @@ make package FINALPACKAGE=1
 
 ## How it works
 
-iOS 16 still ships much of iOS 15, mostly for the iPad, and the tweak uses those parts where they exist: the bubbles view and the still wallpaper view with Perspective Zoom (`PBUIBokehWallpaperView`, `PBUIStaticWallpaperView`), the wallpaper preview (`SBSUIWallpaperPreviewViewController`), the clock's font and the unlock transition's settings.
+iOS 16 still ships much of iOS 15, mostly for the iPad, and the tweak uses those parts where they exist: the bubbles view and the still wallpaper view with Perspective Zoom (`PBUIBokehWallpaperView`, `PBUIStaticWallpaperView`), the wallpaper preview (`SBSUIWallpaperPreviewViewController`), the clock's font, the unlock transition's settings and the drawing of the shadow under app names.
 
 Where iOS 16 has nothing left, like the music player's layout or the notification cards, the tweak adjusts iOS 16's views to the sizes read from a real iOS 15 lock screen. Clock size and position per iPhone follow iOS 15's own rules and are worked out each time SpringBoard starts.
 
