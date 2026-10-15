@@ -808,6 +808,10 @@ static const CGFloat kIOS15PlatterCornerRadius = 18.0;
 - (BOOL)isRevealed;
 @end
 
+@interface NCNotificationMasterList : NSObject
+@property (nonatomic, strong) NCNotificationListView *masterListView;
+@end
+
 // The history section ("Notification Centre" + X) fades its notifications with the reveal but
 // leaves its header at full alpha: on iOS 16 that header waits below the screen's bottom edge
 // until you swipe up. Listed from the top it sits right under the clock, so give the header
@@ -835,7 +839,53 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
     if (fabs(header.alpha - alpha) > 0.001) header.alpha = alpha;
 }
 
+// Pulling down past the list's top opens search (see isScrollingListContent below). iOS 16 lets
+// the list's content (Focus pill, notifications) follow the finger meanwhile; on iOS 15 it stayed
+// put. The offset itself has to move, since search reads it, so the content is shifted back by
+// the overscroll when drawn (sublayerTransform leaves touches and the scroll view alone).
+static void LSRHoldListAtTop(NCNotificationListView *list) {
+    if ([UIDevice currentDevice].userInterfaceIdiom != UIUserInterfaceIdiomPhone) return;
+    if ([list.superview isKindOfClass:NSClassFromString(@"NCNotificationListView")]) return;  // only the outer list
+    CGFloat overscroll = list.contentOffset.y + list.adjustedContentInset.top;
+    CATransform3D hold = overscroll < 0 ? CATransform3DMakeTranslation(0, overscroll, 0) : CATransform3DIdentity;
+    CALayer *layer = list.layer;
+    if (CATransform3DEqualToTransform(layer.sublayerTransform, hold)) return;
+    CATransform3D shown = (layer.presentationLayer ?: layer).sublayerTransform;
+    layer.sublayerTransform = hold;
+    // When iOS animates the offset back to the top (as search closes), the content still shows the
+    // overscroll for the animation's length, so the shift follows along with the same timing.
+    CAAnimation *boundsAnimation = nil;
+    for (NSString *key in layer.animationKeys) {
+        CAAnimation *animation = [layer animationForKey:key];
+        if ([animation isKindOfClass:[CAPropertyAnimation class]]
+            && [((CAPropertyAnimation *)animation).keyPath hasPrefix:@"bounds"]) boundsAnimation = animation;
+    }
+    if ([boundsAnimation isKindOfClass:[CABasicAnimation class]]) {
+        CABasicAnimation *follow = [boundsAnimation copy];
+        follow.keyPath = @"sublayerTransform";
+        follow.additive = NO;
+        follow.fromValue = [NSValue valueWithCATransform3D:shown];
+        follow.toValue = [NSValue valueWithCATransform3D:hold];
+        follow.byValue = nil;
+        [layer addAnimation:follow forKey:@"LSRHoldListAtTop"];
+    }
+}
+
+@interface CSCoverSheetView : UIView
+@end
+
 %group LSRNotifications
+
+// While search is open iOS 16 slides the content (list, Focus pill) about 100pt down and back up
+// when it closes; its list sits low enough for that to look intended. The clock stays put, and
+// on iOS 15 the content did too, so the downward slide is left out. Sideways offsets (camera,
+// widgets page) stay.
+%hook CSCoverSheetView
+- (void)setContentViewOffset:(CGPoint)offset scale:(CGFloat)scale {
+    if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone && offset.y > 0) offset.y = 0;
+    %orig(offset, scale);
+}
+%end
 
 %hook NCNotificationListView
 - (BOOL)layoutFromBottom {
@@ -849,6 +899,12 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 - (void)layoutSubviews {
     %orig;
     LSRApplyHistoryHeaderReveal(self);
+    LSRHoldListAtTop(self);
+}
+
+- (void)setContentOffset:(CGPoint)offset {
+    %orig;
+    LSRHoldListAtTop(self);
 }
 
 - (void)setRevealPercentage:(CGFloat)percentage {
@@ -935,6 +991,21 @@ static void LSRApplyHistoryHeaderReveal(NCNotificationListView *list) {
 
 - (NSUInteger)currentListDisplayStyleSetting {
     return 0;
+}
+
+// Pull to search: iOS 16 treats a downward drag that starts below the list's content as
+// scrolling the list (-[CSCoverSheetViewController spotlightPresenterAllowsPullToSearch:] needs
+// NO here). Its list starts low on the screen; ours starts under the date, so only the clock
+// was left for search. iOS 15 opened search from anywhere while the list rested at its top.
+- (BOOL)isScrollingListContent {
+    BOOL scrolling = %orig;
+    if (!scrolling || [UIDevice currentDevice].userInterfaceIdiom != UIUserInterfaceIdiomPhone) return scrolling;
+    NCNotificationListView *list = self.masterListView;
+    if (![list isKindOfClass:[UIScrollView class]]) return scrolling;
+    if ([list.panGestureRecognizer velocityInView:list].y < 0) return scrolling;
+    // At its top or already pulled past it (the pull itself moves the offset below the top).
+    if (list.contentOffset.y + list.adjustedContentInset.top > 1.0) return scrolling;
+    return NO;
 }
 %end
 
