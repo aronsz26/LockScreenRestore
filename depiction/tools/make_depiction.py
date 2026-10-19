@@ -37,6 +37,7 @@ changelog = [
         "**1.9.5**\n- Dynamic wallpapers and stills are drawn by iOS 15's own views again, with iOS 15's motion and Perspective Zoom\n"
         "- The lighter iOS 15 shadow under the app names (new switch)\n"
         "- iOS 15 sizes for notification cards and the music player, and iOS 15's own clock font\n"
+        "- Live wallpapers to download on every iPhone, including iPhone SE, 8, 8 Plus and XR\n"
         "- Pull down anywhere on the lock screen to open search, like iOS 15\n"
         "- Settings → Wallpaper opens iOS's own preview with Cancel and Set\n"
         "- iPhone Plus models: the wallpaper turns with the home screen in landscape, and the dock blurs the right wallpaper"},
