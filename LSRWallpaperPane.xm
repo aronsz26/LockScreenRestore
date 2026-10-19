@@ -973,39 +973,11 @@ static NSString *LSRRemoteCacheDir(void) {
     return dir;
 }
 
-// Designs for this screen from the repository's file list.
-static NSArray<LSRRemoteDesign *> *LSRRemoteDesignsFromTree(NSArray *tree) {
-    NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:
-        @"^iPhone/[^/]+/[^/]+/(?:Live|Stills)/\\d+\\.(.+?)-(\\d+)w-(\\d+)h@(\\d)x~iphone\\.(heic|png|jpg|mov)$" options:0 error:nil];
-    NSMutableDictionary<NSString *, NSMutableArray *> *bySize = [NSMutableDictionary new];
-    for (NSDictionary *entry in tree) {
-        NSString *path = entry[@"path"];
-        if (![entry[@"type"] isEqualToString:@"blob"] || ![path hasPrefix:@"iPhone/"]) continue;
-        NSTextCheckingResult *match = [pattern firstMatchInString:path options:0 range:NSMakeRange(0, path.length)];
-        if (!match) continue;
-        NSString *size = [NSString stringWithFormat:@"%@x%@@%@", [path substringWithRange:[match rangeAtIndex:2]],
-            [path substringWithRange:[match rangeAtIndex:3]], [path substringWithRange:[match rangeAtIndex:4]]];
-        if (!bySize[size]) bySize[size] = [NSMutableArray new];
-        [bySize[size] addObject:@[path, [path substringWithRange:[match rangeAtIndex:1]], [path substringWithRange:[match rangeAtIndex:5]]]];
-    }
-    // This screen's files, else the closest size.
-    CGSize screen = [UIScreen mainScreen].bounds.size;
-    CGFloat w = MIN(screen.width, screen.height), h = MAX(screen.width, screen.height), scale = [UIScreen mainScreen].scale;
-    NSString *best = nil;
-    CGFloat bestDistance = CGFLOAT_MAX;
-    for (NSString *size in bySize) {
-        NSArray *parts = [size componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"x@"]];
-        CGFloat distance = fabs([parts[0] doubleValue] - w) + fabs([parts[1] doubleValue] - h) + ([parts[2] doubleValue] == scale ? 0 : 1000);
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            best = size;
-        }
-    }
-    if (!best) return @[];
-
+// Designs from one size's files.
+static NSMutableDictionary<NSString *, LSRRemoteDesign *> *LSRRemoteDesignsOfSize(NSArray<NSArray *> *files) {
     NSMutableDictionary<NSString *, LSRRemoteDesign *> *designs = [NSMutableDictionary new];
     NSRegularExpression *model = [NSRegularExpression regularExpressionWithPattern:@"-[A-Z]\\d+" options:0 error:nil];
-    for (NSArray *file in bySize[best]) {
+    for (NSArray *file in files) {
         NSString *raw = [model stringByReplacingMatchesInString:file[1] options:0 range:NSMakeRange(0, [file[1] length]) withTemplate:@""];
         NSString *variant = nil;
         for (NSArray *suffix in @[@[@"_Light", @"Light"], @[@"_Day", @"Light"], @[@"_Dark", @"Dark"], @[@"_Night", @"Dark"]]) {
@@ -1028,6 +1000,43 @@ static NSArray<LSRRemoteDesign *> *LSRRemoteDesignsFromTree(NSArray *tree) {
         }
         NSMutableDictionary *target = [file[2] isEqualToString:@"mov"] ? design.videos : design.stills;
         target[variant ?: @"Light"] = file[0];
+    }
+    return designs;
+}
+
+// Designs for this screen from the repository's file list: this screen's files, else the closest
+// size. The archive only has live videos for Face ID sizes, so live designs come from the closest
+// size that has them (played aspect fill, like every wallpaper); otherwise iPhone SE, 8 or XR
+// would get none.
+static NSArray<LSRRemoteDesign *> *LSRRemoteDesignsFromTree(NSArray *tree) {
+    NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:
+        @"^iPhone/[^/]+/[^/]+/(?:Live|Stills)/\\d+\\.(.+?)-(\\d+)w-(\\d+)h@(\\d)x~iphone\\.(heic|png|jpg|mov)$" options:0 error:nil];
+    NSMutableDictionary<NSString *, NSMutableArray *> *bySize = [NSMutableDictionary new];
+    for (NSDictionary *entry in tree) {
+        NSString *path = entry[@"path"];
+        if (![entry[@"type"] isEqualToString:@"blob"] || ![path hasPrefix:@"iPhone/"]) continue;
+        NSTextCheckingResult *match = [pattern firstMatchInString:path options:0 range:NSMakeRange(0, path.length)];
+        if (!match) continue;
+        NSString *size = [NSString stringWithFormat:@"%@x%@@%@", [path substringWithRange:[match rangeAtIndex:2]],
+            [path substringWithRange:[match rangeAtIndex:3]], [path substringWithRange:[match rangeAtIndex:4]]];
+        if (!bySize[size]) bySize[size] = [NSMutableArray new];
+        [bySize[size] addObject:@[path, [path substringWithRange:[match rangeAtIndex:1]], [path substringWithRange:[match rangeAtIndex:5]]]];
+    }
+    CGSize screen = [UIScreen mainScreen].bounds.size;
+    CGFloat w = MIN(screen.width, screen.height), h = MAX(screen.width, screen.height), scale = [UIScreen mainScreen].scale;
+    NSMutableDictionary<NSString *, NSNumber *> *distances = [NSMutableDictionary new];
+    for (NSString *size in bySize) {
+        NSArray *parts = [size componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"x@"]];
+        distances[size] = @(fabs([parts[0] doubleValue] - w) + fabs([parts[1] doubleValue] - h) + ([parts[2] doubleValue] == scale ? 0 : 1000));
+    }
+    NSArray<NSString *> *sizes = [distances keysSortedByValueUsingSelector:@selector(compare:)];
+    if (!sizes.count) return @[];
+
+    NSMutableDictionary<NSString *, LSRRemoteDesign *> *designs = LSRRemoteDesignsOfSize(bySize[sizes.firstObject]);
+    for (NSString *size in [sizes subarrayWithRange:NSMakeRange(1, sizes.count - 1)]) {
+        [LSRRemoteDesignsOfSize(bySize[size]) enumerateKeysAndObjectsUsingBlock:^(NSString *name, LSRRemoteDesign *design, BOOL *stop) {
+            if (design.live && !designs[name].live) designs[name] = design;
+        }];
     }
     return [[designs allValues] sortedArrayUsingComparator:^NSComparisonResult(LSRRemoteDesign *a, LSRRemoteDesign *b) {
         return [a.name localizedStandardCompare:b.name];
