@@ -30,6 +30,7 @@ Every part has its own switch, so you can mix iOS 15 and iOS 16.
 - Listed right under the clock, always as a list
 - iOS 15 card shape: 18.5 pt corners, tighter padding
 - **Notification Centre** and its ✕ only appear when you swipe up
+- Pulling down anywhere on the lock screen opens search, like iOS 15; the list and the Focus pill stay where they are
 
 ### 🎵 Music player
 - The iOS 15 layout with the sizes of iOS 15's player: large artwork with the app's icon, device name above the title, AirPlay next to it
