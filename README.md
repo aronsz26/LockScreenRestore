@@ -72,7 +72,7 @@ To add one by hand, put `Light.heic` and `Dark.heic` (plus `Light.mov` and `Dark
 
 ## Compatibility
 
-Rootless jailbreaks on **iOS 16**. Tested with Dopamine on:
+Rootless jailbreaks on **iOS 16** only (the package does not install on iOS 17 and later). Tested with Dopamine on:
 
 - iPhone 13 Pro (iOS 16.1.1) and iPhone 12 Pro (iOS 16.5)
 - by users: iPhone X (iOS 16.7), iPhone 11 (iOS 16.1), iPhone 8 Plus (iOS 16.2)
