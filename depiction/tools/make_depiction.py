@@ -34,6 +34,9 @@ details = [
 ]
 changelog = [
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
+        "**1.9.6**\n- The wallpaper fills the whole lock screen when it is pulled down in landscape (was a strip in the middle)\n"
+        "- Can no longer be installed on iOS 17 and later, where it only half applied"},
+    {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "**1.9.5**\n- Dynamic wallpapers and stills are drawn by iOS 15's own views again, with iOS 15's motion and Perspective Zoom\n"
         "- The lighter iOS 15 shadow under the app names (new switch)\n"
         "- iOS 15 sizes for notification cards and the music player, and iOS 15's own clock font\n"
