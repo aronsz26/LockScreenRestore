@@ -1036,6 +1036,8 @@ static const CGFloat kLSRPerspectiveMargin = 28.0;
 static BOOL sLSRDimInDark = NO;
 // Posted when the wallpaper window changes between the lock screen and the home screen.
 static NSString *const kLSRShownScreenNotification = @"LSRShownScreen";
+// app opened/closed: the window turns back without any device rotation (#12)
+static NSString *const kLSRFrontAppChangedNotification = @"LSRFrontAppChanged";
 // Posted in SpringBoard after Settings picked another design or toggled dimming.
 static NSString *const kLSRWallpaperReloadNotification = @"LSRWallpaperReload";
 static NSMutableDictionary<NSString *, UIImage *> *sLSRStillCache;
@@ -1307,6 +1309,8 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_orientationChanged)
                                                      name:UIDeviceOrientationDidChangeNotification object:nil];
         [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_orientationChanged)
+                                                     name:kLSRFrontAppChangedNotification object:nil];
         [self _loadCurrentVariant];
         // iOS may set up its wallpaper content (and the dock's capture in it) after us.
         __weak LSRLiveWallpaperView *weakSelf = self;
@@ -1386,6 +1390,9 @@ static void *kLSRReadyForDisplayContext = &kLSRReadyForDisplayContext;
     [self.window setNeedsLayout];
     // The window may finish turning after the notification.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self setNeedsLayout];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self setNeedsLayout];
     });
 }
@@ -1809,6 +1816,13 @@ static void LSRPlaceCaptureCopy(UIWindow *window) {
 @end
 
 %group LSRWallpaper
+
+%hook SpringBoard
+- (void)frontDisplayDidChange:(id)display {
+    %orig;
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLSRFrontAppChangedNotification object:nil];
+}
+%end
 
 %hook _SBWallpaperSecureWindow
 - (void)layoutSubviews {
