@@ -1660,6 +1660,23 @@ static BOOL LSRHomeScreenIsClear(void) {
     Class coverSheet = NSClassFromString(@"SBCoverSheetPresentationManager");
     id presentation = [coverSheet respondsToSelector:@selector(sharedInstance)] ? ((id (*)(id, SEL))objc_msgSend)(coverSheet, @selector(sharedInstance)) : nil;
     if ([presentation respondsToSelector:@selector(isVisible)] && ((BOOL (*)(id, SEL))objc_msgSend)(presentation, @selector(isVisible))) return NO;
+    // app library / today view open: not a home page (#12)
+    Class iconControllerClass = NSClassFromString(@"SBIconController");
+    id iconController = [iconControllerClass respondsToSelector:@selector(sharedInstanceIfExists)]
+        ? ((id (*)(id, SEL))objc_msgSend)(iconControllerClass, @selector(sharedInstanceIfExists)) : nil;
+    id root = [iconController respondsToSelector:@selector(rootFolderController)]
+        ? ((id (*)(id, SEL))objc_msgSend)(iconController, @selector(rootFolderController)) : nil;
+    if (root) {
+        for (NSString *name in @[@"isLeadingCustomViewVisible", @"isLeadingCustomViewTransitioning"]) {
+            SEL sel = NSSelectorFromString(name);
+            if ([root respondsToSelector:sel] && ((BOOL (*)(id, SEL))objc_msgSend)(root, sel)) return NO;
+        }
+        SEL progress = NSSelectorFromString(@"_trailingCustomViewVisibilityProgress");
+        if ([root respondsToSelector:progress] && ((double (*)(id, SEL))objc_msgSend)(root, progress) > 0.01) return NO;
+        SEL page = NSSelectorFromString(@"currentPageIndex"), trailing = NSSelectorFromString(@"trailingCustomViewPageIndex");
+        if ([root respondsToSelector:page] && [root respondsToSelector:trailing]
+            && ((long long (*)(id, SEL))objc_msgSend)(root, page) == ((long long (*)(id, SEL))objc_msgSend)(root, trailing)) return NO;
+    }
     for (UIWindow *window in ((NSArray *(*)(id, SEL, BOOL, BOOL))objc_msgSend)([UIWindow class],
              NSSelectorFromString(@"allWindowsIncludingInternalWindows:onlyVisibleWindows:"), YES, NO)) {
         if (window.hidden || window.alpha < 0.01) continue;
@@ -1696,6 +1713,17 @@ static void LSRSaveHomePreview(void) {
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
     // Once the unlock animation has settled on the home screen.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        LSRSaveHomePreview();
+    });
+}
+%end
+
+// back home from an app: refresh too, not only after unlocking
+%hook SpringBoard
+- (void)frontDisplayDidChange:(id)display {
+    %orig;
+    if (display) return;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         LSRSaveHomePreview();
     });
