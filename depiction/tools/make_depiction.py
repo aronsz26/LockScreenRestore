@@ -34,6 +34,9 @@ details = [
 ]
 changelog = [
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
+        "**1.9.7**\n- The home screen wallpaper no longer stays turned sideways after closing an app that was in landscape\n"
+        "- The home screen preview in Settings → Wallpaper no longer shows the App Library and updates after closing an app"},
+    {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
         "**1.9.6**\n- The wallpaper fills the whole lock screen when it is pulled down in landscape (was a strip in the middle)\n"
         "- Can no longer be installed on iOS 17 and later, where it only half applied"},
     {"class": "DepictionMarkdownView", "useSpacing": True, "markdown":
